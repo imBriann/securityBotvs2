@@ -10,6 +10,7 @@ from app.services.conversation_flow import handle_user_message
 from app.services.external_apis import send_whatsapp_message
 from app.storage.users_state import db_get_user, db_create_user
 from app.utils.preprocessing import normalize_text
+from app.utils.config import APIConfig
 
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
 PROCESSED_MESSAGE_IDS_CACHE_SIZE = 1000
@@ -86,12 +87,15 @@ async def whatsapp_webhook_handler(request: Request):
                 print(f"Error CRÍTICO: No se pudo crear/leer usuario {telefono_remitente}.")
                 return JSONResponse(content={"status": "error interno"}, status_code=500)
 
-            await send_whatsapp_message(telefono_remitente,
-                "👋 ¡Hola! Soy SecurityBot-WA, tu asistente virtual para ayudarte a navegar seguro en el mundo digital en Colombia. 😊\n\n"
-                "Para darte la mejor orientación y cumplir con la Ley 1581 de 2012 (protección de datos personales), necesito tu autorización para guardar algunos datos como tu número de teléfono, y más adelante, tu nombre, edad y nivel de conocimiento en ciberseguridad.\n\n"
-                "🔒 Tu información será confidencial y se usará exclusivamente para mejorar tu experiencia. ¡Nunca la compartiré con terceros!\n\n"
-                "📄 Puedes conocer más detalles en nuestros Términos y Política de Privacidad: https://drive.google.com/file/d/1x7fp9FO3vRGaRcpEeJTbVa050B5aordr/view?usp=sharing\n\n"
-                "👉 Si estás de acuerdo, por favor responde con: ACEPTO"
+            await send_whatsapp_message(
+                to=telefono_remitente,  # Usar nombre de argumentos es más seguro
+                text="👋 ¡Hola! Soy SecurityBot-WA, tu asistente virtual para ayudarte a navegar seguro en el mundo digital en Colombia. 😊\n\n"
+                     "Para darte la mejor orientación y cumplir con la Ley 1581 de 2012 (protección de datos personales), necesito tu autorización para guardar algunos datos como tu número de teléfono, y más adelante, tu nombre, edad y nivel de conocimiento en ciberseguridad.\n\n"
+                     "🔒 Tu información será confidencial y se usará exclusivamente para mejorar tu experiencia. ¡Nunca la compartiré con terceros!\n\n"
+                     "📄 Puedes conocer más detalles en nuestros Términos y Política de Privacidad: https://drive.google.com/file/d/1x7fp9FO3vRGaRcpEeJTbVa050B5aordr/view?usp=sharing\n\n"
+                     "👉 Si estás de acuerdo, por favor responde con: ACEPTO",
+                access_token=APIConfig.ACCESS_TOKEN,     # <--- NUEVO ARGUMENTO
+                phone_number_id=APIConfig.PHONE_NUMBER_ID # <--- NUEVO ARGUMENTO
             )
             return JSONResponse(content={}, status_code=200)
 

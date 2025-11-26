@@ -195,3 +195,18 @@ if not TesseractConfig.validate_installation():
 
 # Asegurar directorio de imágenes
 OCRConfig.ensure_images_dir()
+
+# Configuración de Base de Datos
+DB_NAME = "usuarios_bot.db"
+
+# Alias para Tips de Seguridad (para compatibilidad con conversation_flow.py)
+SECURITY_TIPS = SecurityTips.TIPS
+
+# Estados de Conversación (para compatibilidad con conversation_flow.py)
+ESTADO_PENDIENTE_TERMINOS = 0
+ESTADO_PENDIENTE_NOMBRE = 1
+ESTADO_PENDIENTE_EDAD = 2
+ESTADO_PENDIENTE_CONOCIMIENTO = 3
+ESTADO_REGISTRADO = 4
+ESTADO_ESPERANDO_RESPUESTA_PHISHING = 5
+ESTADO_ESPERANDO_MAS_DETALLES = 6

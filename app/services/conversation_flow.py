@@ -3,9 +3,9 @@ import os
 import re
 import sqlite3
 from app.services.external_apis import send_whatsapp_message, analyze_with_deepseek
-from app.services.svm_classifier import extract_first_url
+# from app.services.svm_classifier import extract_first_url
 from app.storage.users_state import db_update_user, db_get_user
-from app.utils.preprocessing import normalize_text
+from app.utils.preprocessing import normalize_text, extract_first_url
 from app.utils.config import (
     ESTADO_PENDIENTE_TERMINOS, ESTADO_PENDIENTE_NOMBRE, ESTADO_PENDIENTE_EDAD,
     ESTADO_PENDIENTE_CONOCIMIENTO, ESTADO_REGISTRADO, ESTADO_ESPERANDO_RESPUESTA_PHISHING,
