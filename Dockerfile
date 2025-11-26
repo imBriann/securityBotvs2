@@ -24,7 +24,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copia el resto de la aplicación
 # Copiamos la carpeta 'app' y los archivos sueltos
 COPY app/ ./app/
-COPY .env.example .
+COPY .env .
 
 # Crea el directorio para las imágenes
 RUN mkdir -p /securitybot/imagenes_recibidas
