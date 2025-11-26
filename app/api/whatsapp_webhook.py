@@ -7,7 +7,7 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import PlainTextResponse, JSONResponse
 
 from app.services.conversation_flow import handle_user_message
-from app.services.external_apis import send_whatsapp_message
+from app.services.external_apis import send_whatsapp_message, set_http_client 
 from app.storage.users_state import db_get_user, db_create_user
 from app.utils.preprocessing import normalize_text
 from app.utils.config import APIConfig
@@ -24,6 +24,9 @@ async def lifespan(app: FastAPI):
     global http_client
     print("Iniciando aplicación y cliente HTTP...")
     http_client = httpx.AsyncClient(timeout=45.0)
+
+    set_http_client(http_client)
+    
     yield
     print("Cerrando cliente HTTP y finalizando aplicación...")
     if http_client:

@@ -3,6 +3,7 @@ Módulo para interacciones con APIs externas (WhatsApp y DeepSeek).
 """
 import httpx
 from typing import Optional, Dict
+from app.utils.config import APIConfig
 
 # Cliente HTTP global
 http_client: Optional[httpx.AsyncClient] = None
@@ -22,20 +23,21 @@ def set_http_client(client: httpx.AsyncClient):
 async def send_whatsapp_message(
     to: str, 
     text: str,
-    access_token: str,
-    phone_number_id: str
+    access_token: str = None,      # <--- AHORA ES OPCIONAL
+    phone_number_id: str = None    # <--- AHORA ES OPCIONAL
 ):
     """
     Envía un mensaje de texto a través de WhatsApp Business API.
-    
-    Args:
-        to: Número de teléfono destinatario
-        text: Contenido del mensaje
-        access_token: Token de acceso de WhatsApp
-        phone_number_id: ID del número de teléfono de WhatsApp
+    Si no se proveen tokens, se usan los de APIConfig.
     """
     global http_client
     
+    # Cargar defaults si es necesario
+    if access_token is None:
+        access_token = APIConfig.ACCESS_TOKEN
+    if phone_number_id is None:
+        phone_number_id = APIConfig.PHONE_NUMBER_ID
+
     if not http_client:
         print("Error: El cliente HTTP no está inicializado.")
         return
@@ -44,7 +46,7 @@ async def send_whatsapp_message(
         print("Error: ACCESS_TOKEN o PHONE_NUMBER_ID no configurados.")
         return
 
-    url = f"https://graph.facebook.com/v18.0/{phone_number_id}/messages"
+    url = f"https://graph.facebook.com/v22.0/{phone_number_id}/messages"
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json"
@@ -71,24 +73,20 @@ async def send_whatsapp_message(
 async def analyze_with_deepseek(
     message_text: str,
     mode: str,
-    api_key: str,
-    api_url: str,
-    user_profile: Optional[Dict] = None
+    user_profile: Optional[Dict] = None,  # <--- MOVIDO A 3RA POSICIÓN (Coincide con conversation_flow)
+    api_key: str = None,                  # <--- AHORA ES OPCIONAL
+    api_url: str = None                   # <--- AHORA ES OPCIONAL
 ) -> Optional[str]:
     """
     Analiza texto usando la API de DeepSeek.
-    
-    Args:
-        message_text: Texto a analizar
-        mode: Modo de análisis (nombre, edad, conocimiento, intencion, phishing, etc.)
-        api_key: API key de DeepSeek
-        api_url: URL de la API de DeepSeek
-        user_profile: Perfil del usuario para contexto (opcional)
-    
-    Returns:
-        Respuesta del análisis o None si hay error
     """
     global http_client
+    
+    # Cargar defaults si es necesario
+    if api_key is None:
+        api_key = APIConfig.DEEPSEEK_API_KEY
+    if api_url is None:
+        api_url = APIConfig.DEEPSEEK_API_URL
     
     if not http_client:
         print("Error: El cliente HTTP no está inicializado.")
@@ -106,7 +104,7 @@ async def analyze_with_deepseek(
 
     prompts_config = {
         "nombre": {
-            "system": (
+             "system": (
                 "Eres un experto en extraer nombres de personas de un texto. El usuario te dará un mensaje donde se espera que esté su nombre.\n"
                 "Analiza la entrada y responde SOLO con una de estas opciones:\n"
                 "- Si encuentras un nombre de persona claro y plausible, responde con: NOMBRE_VALIDO:{nombre_extraido} (ej. NOMBRE_VALIDO:Carlos, NOMBRE_VALIDO:Maria Eugenia).\n"
@@ -195,13 +193,13 @@ async def analyze_with_deepseek(
 
     current_prompt = prompts_config[mode]
     payload = {
-        "model": "deepseek-chat",
+        "model": APIConfig.DEEPSEEK_MODEL,
         "messages": [
             {"role": "system", "content": current_prompt["system"]},
             {"role": "user", "content": current_prompt["user"]}
         ],
-        "temperature": 0.4,
-        "max_tokens": 1600,
+        "temperature": APIConfig.DEEPSEEK_TEMPERATURE,
+        "max_tokens": APIConfig.DEEPSEEK_MAX_TOKENS,
         "web_search": True
     }
     
@@ -234,27 +232,15 @@ async def analyze_with_deepseek(
 
 async def download_image_from_whatsapp(
     media_id: str,
-    access_token: str
+    access_token: str = None # <--- AHORA ES OPCIONAL
 ) -> Optional[bytes]:
     """
     Descarga una imagen desde WhatsApp Business API.
-    
-    Args:
-        media_id: ID del medio en WhatsApp
-        access_token: Token de acceso de WhatsApp
-    
-    Returns:
-        Bytes de la imagen o None si hay error
     """
     global http_client
     
-    if not http_client:
-        print("Error: El cliente HTTP no está inicializado.")
-        return None
-        
-    if not access_token:
-        print("Error: ACCESS_TOKEN no configurado.")
-        return None
+    if access_token is None:
+        access_token = APIConfig.ACCESS_TOKEN
 
     headers = {"Authorization": f"Bearer {access_token}"}
     
