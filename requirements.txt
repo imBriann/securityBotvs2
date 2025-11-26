@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+pytesseract
+httpx
+python-dotenv
+Pillow
