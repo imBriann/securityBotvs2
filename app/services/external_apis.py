@@ -143,10 +143,10 @@ async def analyze_with_deepseek(
             "system": (
                 "Clasifica el siguiente texto SOLO como una de estas opciones: 'Sí', 'No', 'Poco' o 'CONOCIMIENTO_AMBIGUO'.\n"
                 "El usuario está respondiendo a la pregunta '¿qué tanto sabes sobre ciberseguridad y estafas en línea?'.\n"
-                "- 'Sí': si dice que sabe, tiene experiencia, entiende bien, etc.\n"
-                "- 'No': si dice que no sabe, no entiende, es nuevo en esto, etc.\n"
-                "- 'Poco': si dice que sabe un poquito, más o menos, algo, regular, etc.\n"
-                "- 'CONOCIMIENTO_AMBIGUO': si la respuesta es muy vaga, evasiva, una pregunta como 'qué?' o 'no entiendo la pregunta', o no se puede clasificar claramente en las anteriores (ej. 'depende', 'a veces', 'gracias'). Ten especial cuidado con respuestas cortas que no sean claramente afirmativas o negativas sobre su conocimiento.\n"
+                "- 'ALTO': si dice que sabe, tiene experiencia, entiende bien, etc.\n"
+                "- 'BAJO': si dice que no sabe, no entiende, es nuevo en esto, etc.\n"
+                "- 'MEDIO': si dice que sabe un poquito, más o menos, algo, regular, etc.\n"
+                "- 'BAJO': si la respuesta es muy vaga, evasiva, una pregunta como 'qué?' o 'no entiendo la pregunta', o no se puede clasificar claramente en las anteriores (ej. 'depende', 'a veces', 'gracias'). Ten especial cuidado con respuestas cortas que no sean claramente afirmativas o negativas sobre su conocimiento.\n"
                 "No expliques nada más. Solo una de las cuatro opciones."
             ),
             "user": message_text

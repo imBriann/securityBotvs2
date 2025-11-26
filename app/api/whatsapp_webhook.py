@@ -122,8 +122,7 @@ async def whatsapp_webhook_handler(request: Request):
                             {
                                 "type": "image",
                                 "image": {
-                                    # IMPORTANTE: Cambia esto por tu URL real si la plantilla requiere imagen dinámica
-                                    "link": "https://i.ytimg.com/vi/WRe18g-TTCQ/maxresdefault.jpg" 
+                                    "link": "https://i.ibb.co/n8zgC5SG/portada1.jpg" 
                                 }
                             }
                         ]

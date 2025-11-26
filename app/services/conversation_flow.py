@@ -83,7 +83,8 @@ async def handle_reset_command(telefono: str, user_name: str):
 
 async def handle_onboarding_process(telefono: str, text_received: str, user_data: sqlite3.Row, message_type: str):
     """Maneja el proceso de registro del usuario"""
-    if message_type != "text":
+    # AHORA PERMITIMOS TEXTO, BOTONES Y MENSAJES INTERACTIVOS:
+    if message_type not in ["text", "button", "interactive"]:
         user_name = user_data["nombre"] if user_data and user_data["nombre"] else "tú"
         await send_whatsapp_message(telefono, 
             f"¡Hola, {user_name}! 😊 Para que podamos configurar tu perfil, necesito que me respondas con mensajes de texto. ¡Gracias!")
@@ -126,7 +127,7 @@ async def handle_terminos_aceptacion(telefono: str, text_received: str):
             "Entendido. Si cambias de opinión y deseas aceptar los términos para usar mis servicios, solo escribe *ACEPTO*. ¡Estaré aquí para ayudarte! 👍")
     else:
         await send_whatsapp_message(telefono, 
-            "⚠️ Para que podamos continuar, necesito que aceptes los términos. Solo escribe *ACEPTO* si estás de acuerdo. Si no deseas continuar, puedes responder *NO ACEPTO*. ¡Gracias! 💙")
+            "⚠️ Para que podamos continuar, necesito que aceptes los términos. Solo escribe *ACEPTO* si estás de acuerdo o presiona el boton. Si no deseas continuar, puedes responder *NO ACEPTO*. ¡Gracias! 💙")
 
 async def handle_nombre_input(telefono: str, text_received: str):
     """Maneja la entrada del nombre"""
@@ -154,7 +155,10 @@ async def handle_edad_input(telefono: str, text_received: str, user_name: str):
             if 5 <= edad_num <= 120:
                 db_update_user(telefono, {"edad": edad_num, "estado": ESTADO_PENDIENTE_CONOCIMIENTO})
                 await send_whatsapp_message(telefono, 
-                    f"¡Perfecto, {user_name}! 👍 Ya casi terminamos. Cuéntame, ¿qué tanto sabes sobre ciberseguridad y estafas en línea? Puedes responder: *Sí* (si sabes bastante), *Poco*, o *No* (si no sabes mucho). ¡Tu honestidad me ayuda a ayudarte mejor! 😊")
+                    f"¡Perfecto, {user_name}! 👍 Ya casi terminamos con tu registro.\n\n"
+                    "Cuéntame, ¿qué tanto sabes sobre ciberseguridad y estafas en línea? \n"
+                    "Puedes escribir un resumen de tu experiencia (Ej: 'Solo sé lo básico') y la IA lo clasificará como *Bajo*, *Medio* o *Alto*."
+                )
             else:
                 await send_whatsapp_message(telefono, 
                     f"⚠️ Entendí el número {edad_num}, pero parece una edad un poco inusual, {user_name}. ¿Podrías confirmarla o escribirla de nuevo? ¡Gracias!")
@@ -169,19 +173,54 @@ async def handle_edad_input(telefono: str, text_received: str, user_name: str):
             f"🤔 No estoy seguro de haber entendido tu edad, {user_name}. ¿Podrías escribirla solo con números, por ejemplo '70'? ¡Gracias por tu paciencia!")
 
 async def handle_conocimiento_input(telefono: str, text_received: str, user_name: str):
-    """Maneja la entrada de nivel de conocimiento"""
-    ia_result = await analyze_with_deepseek(text_received, "conocimiento")
+    """
+    Maneja el estado de solicitud de nivel de conocimiento en ciberseguridad
+    usando la IA para clasificar la respuesta libre del usuario.
+    """
+    current_user = db_get_user(telefono)
+    
+    # 2. Llamamos a DeepSeek para clasificar la respuesta
+    # El prompt para 'conocimiento' está configurado para devolver SOLO la palabra ALTO, MEDIO o BAJO.
+    clasificacion_ia = await analyze_with_deepseek(
+        message_text=text_received,
+        mode="conocimiento", 
+        user_profile=dict(current_user) if current_user else {} # Pasamos los datos del usuario
+    )
 
-    if ia_result in ["Sí", "No", "Poco"]:
-        db_update_user(telefono, {"conocimiento": ia_result, "estado": ESTADO_REGISTRADO})
-        await send_whatsapp_message(telefono, 
-            f"¡Genial, {user_name}! ✅ ¡Hemos completado tu registro! Muchas gracias por tu tiempo y confianza. 🙏\n\n"
-            f"🛡️ A partir de ahora, estoy a tu disposición. Puedes enviarme cualquier mensaje de texto o imagen que te parezca sospechosa, "
-            f"y la analizaré contigo. También puedes hacerme preguntas sobre seguridad digital y cómo protegerte de fraudes en línea.\n\n"
-            f"¡Estoy aquí para ayudarte a navegar el mundo digital de forma más segura! 😊")
+    nivel_conocimiento = None
+
+    if clasificacion_ia:
+        # Normalizamos la respuesta de la IA
+        respuesta_limpia = clasificacion_ia.upper().strip()
+
+        if "ALTO" in respuesta_limpia:
+            nivel_conocimiento = "ALTO"
+        elif "MEDIO" in respuesta_limpia:
+            nivel_conocimiento = "MEDIO"
+        elif "BAJO" in respuesta_limpia:
+            nivel_conocimiento = "BAJO"
+
+    # 3. Procesamiento del resultado
+    if nivel_conocimiento:
+        # Actualizamos la base de datos y cambiamos el estado a REGISTRADO
+        db_update_user(telefono, {"conocimiento": nivel_conocimiento, "estado": ESTADO_REGISTRADO})
+        
+        # Respuesta final de bienvenida
+        await send_whatsapp_message(
+            telefono, 
+            f"¡Excelente, {user_name}! Tu perfil se ha completado exitosamente. 🎉\n\n"
+            f"Hemos clasificado tu nivel de ciberseguridad como: *{nivel_conocimiento}*.\n\n"
+            "A partir de ahora, puedes: \n"
+            "1️⃣ Preguntarme cualquier duda sobre seguridad.\n"
+            "2️⃣ Enviarme enlaces o fotos sospechosas para analizar.\n"
+            "¡Estoy aquí para ayudarte a navegar seguro! 👍"
+        )
     else:
-        await send_whatsapp_message(telefono, 
-            f"⚠️ Ups, {user_name}. No entendí bien tu respuesta sobre tu conocimiento. ¿Podrías decirme si sabes *Sí*, *Poco*, o *No* sobre ciberseguridad? ¡Una de esas tres opciones me ayuda mucho! 👍")
+        # Fallback si la IA no pudo clasificar o hubo un error en la API
+        await send_whatsapp_message(
+            telefono, 
+            f"⚠️ Lo siento, {user_name}, no pude entender tu nivel de conocimiento con claridad. Para terminar tu registro, por favor, solo responde: *Bajo*, *Medio* o *Alto*."
+        )
 
 async def handle_registered_user_message(telefono: str, message_object: dict, message_type: str, 
                                         text_recibido: str, user_data: sqlite3.Row):
