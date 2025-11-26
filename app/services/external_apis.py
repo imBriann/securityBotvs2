@@ -183,8 +183,36 @@ async def analyze_with_deepseek(
             ),
             "user": message_text
         },
-        # Agregar el resto de los prompts del código original
-        # (phishing, ayuda_post_estafa, cyber_pregunta)
+        "phishing": {
+            "system": (
+                "Eres un experto en ciberseguridad. Analiza el siguiente mensaje o texto para detectar si es un intento de Phishing, Estafa, Spam o si es Legítimo.\n"
+                "Tu respuesta DEBE tener estrictamente este formato dividido en dos partes:\n"
+                "1. Un resumen muy breve y directo (máximo 2 frases) con el veredicto para mostrar en la notificación.\n"
+                "2. La cadena separadora: '---DETALLES_SIGUEN---'\n"
+                "3. Una explicación detallada, mencionando las 'Red Flags' o señales de alerta encontradas (urgencia, enlaces extraños, remitente desconocido, etc.) y recomendaciones de seguridad.\n"
+                "Si el mensaje es seguro, dilo claramente."
+            ),
+            "user": message_text
+        },
+        "cyber_pregunta": {
+            "system": (
+                "Eres SecurityBot-WA, un asistente experto en ciberseguridad amigable y útil para usuarios colombianos.\n"
+                "El usuario te hará una pregunta sobre seguridad digital, privacidad, virus, contraseñas o estafas.\n"
+                "Responde de forma clara, educativa y práctica. Evita tecnicismos excesivos si no son necesarios. Usa emojis para hacer la lectura más amena.\n"
+                "Si la pregunta no tiene nada que ver con seguridad o tecnología, responde amablemente que solo puedes ayudar con temas de seguridad digital."
+            ),
+            "user": message_text
+        },
+        "ayuda_post_estafa": {
+            "system": (
+                "Eres un experto en respuesta a incidentes de seguridad para ciudadanos.\n"
+                "El usuario acaba de indicar que CAYÓ en una estafa o interactuó con un enlace malicioso.\n"
+                "Tu tarea es darle una lista de pasos de emergencia CLAROS y ACCIONABLES para mitigar el daño.\n"
+                "Ejemplos de consejos: Contactar al banco inmediatamente, cambiar contraseñas desde otro dispositivo, activar doble factor de autenticación, reportar el número, desconectar internet si descargó algo, etc.\n"
+                "Mantén la calma y sé empático, pero urgente en las acciones."
+            ),
+            "user": message_text
+        }
     }
     
     if mode not in prompts_config:

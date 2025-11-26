@@ -236,12 +236,16 @@ async def handle_text_message(telefono: str, text: str, user_data: sqlite3.Row):
 
 async def handle_saludo(telefono: str, nombre_usuario: str, user_data: sqlite3.Row):
     """Maneja saludos del usuario"""
+    # CORRECCIÓN: Convertimos el objeto Row a diccionario real para usar .get()
+    user_dict = dict(user_data)
+    
     greeting = f"¡Hola de nuevo, {nombre_usuario}! 👋"
     last_interaction_info = ""
     
-    if user_data.get("last_image_timestamp"):
+    # Ahora usamos user_dict en lugar de user_data para usar .get()
+    if user_dict.get("last_image_timestamp"):
         last_interaction_info = " La última vez que interactuamos fue sobre un análisis reciente."
-    elif user_data.get("last_analyzed_url"):
+    elif user_dict.get("last_analyzed_url"):
         last_interaction_info = " Recientemente analizamos un enlace."
     
     greeting += last_interaction_info + " ¿En qué te puedo ayudar hoy? 😊"

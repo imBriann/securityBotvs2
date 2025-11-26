@@ -97,8 +97,8 @@ async def whatsapp_webhook_handler(request: Request):
                      "🔒 Tu información será confidencial y se usará exclusivamente para mejorar tu experiencia. ¡Nunca la compartiré con terceros!\n\n"
                      "📄 Puedes conocer más detalles en nuestros Términos y Política de Privacidad: https://drive.google.com/file/d/1x7fp9FO3vRGaRcpEeJTbVa050B5aordr/view?usp=sharing\n\n"
                      "👉 Si estás de acuerdo, por favor responde con: ACEPTO",
-                access_token=APIConfig.ACCESS_TOKEN,     # <--- NUEVO ARGUMENTO
-                phone_number_id=APIConfig.PHONE_NUMBER_ID # <--- NUEVO ARGUMENTO
+                access_token=APIConfig.ACCESS_TOKEN,
+                phone_number_id=APIConfig.PHONE_NUMBER_ID 
             )
             return JSONResponse(content={}, status_code=200)
 
