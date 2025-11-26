@@ -4,3 +4,5 @@ pytesseract
 httpx
 python-dotenv
 Pillow
+numpy
+requests
