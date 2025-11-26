@@ -46,7 +46,7 @@ async def send_whatsapp_message(
         print("Error: ACCESS_TOKEN o PHONE_NUMBER_ID no configurados.")
         return
 
-    url = f"https://graph.facebook.com/v22.0/{phone_number_id}/messages"
+    url = f"https://graph.facebook.com/v18.0/{phone_number_id}/messages"
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json"
@@ -73,9 +73,9 @@ async def send_whatsapp_message(
 async def analyze_with_deepseek(
     message_text: str,
     mode: str,
-    user_profile: Optional[Dict] = None,  # <--- MOVIDO A 3RA POSICIÓN (Coincide con conversation_flow)
-    api_key: str = None,                  # <--- AHORA ES OPCIONAL
-    api_url: str = None                   # <--- AHORA ES OPCIONAL
+    user_profile: Optional[Dict] = None,  
+    api_key: str = None,                  
+    api_url: str = None                   
 ) -> Optional[str]:
     """
     Analiza texto usando la API de DeepSeek.
