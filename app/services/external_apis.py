@@ -22,28 +22,26 @@ def set_http_client(client: httpx.AsyncClient):
 
 async def send_whatsapp_message(
     to: str, 
-    text: str,
-    access_token: str = None,      # <--- AHORA ES OPCIONAL
-    phone_number_id: str = None    # <--- AHORA ES OPCIONAL
+    text: str = None,               # Ahora es opcional si usas template
+    message_type: str = "text",     # "text" o "template"
+    template_name: str = None,      # Nombre de la plantilla (ej. "tyc")
+    template_language: str = "es_CO", 
+    template_components: list = None, # Para pasar la imagen o variables
+    access_token: str = None,
+    phone_number_id: str = None
 ):
     """
-    Envía un mensaje de texto a través de WhatsApp Business API.
-    Si no se proveen tokens, se usan los de APIConfig.
+    Envía un mensaje (texto o plantilla) a través de WhatsApp Business API.
     """
     global http_client
     
-    # Cargar defaults si es necesario
     if access_token is None:
         access_token = APIConfig.ACCESS_TOKEN
     if phone_number_id is None:
         phone_number_id = APIConfig.PHONE_NUMBER_ID
 
-    if not http_client:
-        print("Error: El cliente HTTP no está inicializado.")
-        return
-        
-    if not access_token or not phone_number_id:
-        print("Error: ACCESS_TOKEN o PHONE_NUMBER_ID no configurados.")
+    if not http_client or not access_token or not phone_number_id:
+        print("Error: Cliente HTTP o credenciales no configuradas.")
         return
 
     url = f"https://graph.facebook.com/v18.0/{phone_number_id}/messages"
@@ -51,23 +49,38 @@ async def send_whatsapp_message(
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json"
     }
+
+    # Construcción del Payload según el tipo
     payload = {
         "messaging_product": "whatsapp",
         "to": to,
-        "type": "text",
-        "text": {"body": text}
+        "type": message_type
     }
+
+    if message_type == "text":
+        if not text:
+            print("Error: Se intentó enviar mensaje de texto sin contenido.")
+            return
+        payload["text"] = {"body": text}
+        
+    elif message_type == "template":
+        if not template_name:
+            print("Error: Se requiere template_name para mensajes de plantilla.")
+            return
+        payload["template"] = {
+            "name": template_name,
+            "language": {"code": template_language},
+            "components": template_components or []
+        }
 
     try:
         response = await http_client.post(url, json=payload, headers=headers)
         response.raise_for_status()
-        print(f"Mensaje enviado a {to}: '{text[:50]}...' (Estado: {response.status_code})")
-    except httpx.HTTPStatusError as e:
-        print(f"Error al enviar mensaje a WhatsApp ({to}): {e.response.status_code} - {e.response.text}")
-    except httpx.RequestError as e:
-        print(f"Error de red al enviar mensaje a WhatsApp ({to}): {e}")
+        # Log más limpio dependiendo del tipo
+        content_log = text[:30] if text else f"Template: {template_name}"
+        print(f"Mensaje enviado a {to}: [{content_log}] (Estado: {response.status_code})")
     except Exception as e:
-        print(f"Error inesperado en send_whatsapp_message ({to}): {e}")
+        print(f"Error enviando mensaje a {to}: {e}")
 
 
 async def analyze_with_deepseek(

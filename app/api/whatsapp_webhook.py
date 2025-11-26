@@ -60,8 +60,27 @@ async def whatsapp_webhook_handler(request: Request):
         whatsapp_message_id = message_object.get("id")
         text_recibido_original = ""
         
+        # LÓGICA DE LECTURA ROBUSTA
         if message_type == "text":
             text_recibido_original = message_object.get("text", {}).get("body", "").strip()
+            
+        elif message_type == "button":
+            # Caso 1: Botón de respuesta rápida (Quick Reply) de una Plantilla
+            # Intentamos leer el texto visible del botón
+            text_recibido_original = message_object.get("button", {}).get("text", "").strip()
+            # Si el texto falla, leemos el payload (dato oculto)
+            if not text_recibido_original:
+                text_recibido_original = message_object.get("button", {}).get("payload", "").strip()
+                
+        elif message_type == "interactive":
+            # Caso 2: Botones Interactivos o Listas (Menús)
+            interactive_obj = message_object.get("interactive", {})
+            interactive_type = interactive_obj.get("type")
+            
+            if interactive_type == "button_reply":
+                text_recibido_original = interactive_obj.get("button_reply", {}).get("title", "").strip()
+            elif interactive_type == "list_reply":
+                text_recibido_original = interactive_obj.get("list_reply", {}).get("title", "").strip()
 
         print(f"DEBUG: Webhook IN: Tel: {telefono_remitente}, MsgID: {whatsapp_message_id}, Type: {message_type}, Text: '{text_recibido_original[:50]}...'")
 
@@ -90,16 +109,28 @@ async def whatsapp_webhook_handler(request: Request):
                 print(f"Error CRÍTICO: No se pudo crear/leer usuario {telefono_remitente}.")
                 return JSONResponse(content={"status": "error interno"}, status_code=500)
 
+            # --- AQUÍ ENVIAMOS TU PLANTILLA TYC ---
             await send_whatsapp_message(
-                to=telefono_remitente,  # Usar nombre de argumentos es más seguro
-                text="👋 ¡Hola! Soy SecurityBot-WA, tu asistente virtual para ayudarte a navegar seguro en el mundo digital en Colombia. 😊\n\n"
-                     "Para darte la mejor orientación y cumplir con la Ley 1581 de 2012 (protección de datos personales), necesito tu autorización para guardar algunos datos como tu número de teléfono, y más adelante, tu nombre, edad y nivel de conocimiento en ciberseguridad.\n\n"
-                     "🔒 Tu información será confidencial y se usará exclusivamente para mejorar tu experiencia. ¡Nunca la compartiré con terceros!\n\n"
-                     "📄 Puedes conocer más detalles en nuestros Términos y Política de Privacidad: https://drive.google.com/file/d/1x7fp9FO3vRGaRcpEeJTbVa050B5aordr/view?usp=sharing\n\n"
-                     "👉 Si estás de acuerdo, por favor responde con: ACEPTO",
-                access_token=APIConfig.ACCESS_TOKEN,
-                phone_number_id=APIConfig.PHONE_NUMBER_ID 
+                to=telefono_remitente,
+                message_type="template",
+                template_name="tyc",
+                template_language="es_CO",
+                template_components=[
+                    {
+                        "type": "header",
+                        "parameters": [
+                            {
+                                "type": "image",
+                                "image": {
+                                    # IMPORTANTE: Cambia esto por tu URL real si la plantilla requiere imagen dinámica
+                                    "link": "https://i.ytimg.com/vi/WRe18g-TTCQ/maxresdefault.jpg" 
+                                }
+                            }
+                        ]
+                    }
+                ]
             )
+            # --------------------------------------
             return JSONResponse(content={}, status_code=200)
 
         # Delegar el manejo del mensaje al módulo conversation_flow
