@@ -31,6 +31,21 @@ PHISHING_MESSAGES = [
     "Nequi Urgente: Su cuenta Nequi requiere verificación inmediata. Complete el proceso: http://nequi-verificacion.co/user/",
     "COLPATRIA Informa: Transacción rechazada por falta de actualización de datos. Ingrese a http://colpatria-update.com.co/cliente",
     
+    # Estafas con URLs acortadas (CRÍTICO - común en phishing)
+    "BBVA Estimado cliente: A partir del 19/06/2023, no podra utilizar su cuenta. Hasta que actualice el nuevo sistema de seguridad: https://tinyurl.com/b5ekydek",
+    "Bancolombia: Su cuenta será suspendida. Actualice datos urgente: https://bit.ly/3xK9mP2",
+    "Davivienda le informa: Debe actualizar su token digital. Ingrese aquí: https://goo.gl/maps/XyZ123",
+    "BANCO POPULAR: Verifique su información antes del 30/Nov: https://t.co/aB3xYz",
+    "Nequi Alerta: Su cuenta presenta actividad sospechosa. Confirme: https://is.gd/secure123",
+    "BANCO DE OCCIDENTE: Actualice contraseña por seguridad: https://ow.ly/X7pQ50",
+    "Banco Agrario: Su tarjeta débito será bloqueada. Reactive: https://buff.ly/3yH8kL",
+    "Davivienda: Detectamos ingreso no autorizado. Cambie clave: https://shorte.st/banco2025",
+    
+    # Más variaciones de bloqueo/suspensión con URLs acortadas
+    "Su cuenta BBVA será desactivada hoy. Evítelo actualizando datos: https://tinyurl.com/bbva-update",
+    "Bancolombia informa: Cuenta suspendida temporalmente. Reactive: https://bit.ly/bancocol-verify",
+    "AVISO IMPORTANTE Davivienda: No podrá usar su cuenta desde mañana. Actualice: https://t.co/DvvSecure",
+    
     # Estafas de premios y sorteos Colombia
     "FELICITACIONES! Ha ganado $15.000.000 en el sorteo de Baloto. Reclame su premio en http://baloto-premios.co/ganador codigo: BAL2025",
     "Éxito te premia! Has sido seleccionado para ganar un bono de $500.000. Reclámalo ya: http://exito-bonos.com/premio ID:EX8473",

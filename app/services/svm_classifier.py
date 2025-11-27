@@ -116,11 +116,12 @@ class URLValidator:
                 analysis['flags'].append(f'Usa TLD sospechoso: {tld}')
                 break
         
-        # Verificar acortadores de URL
+        # Verificar acortadores de URL (MUY SOSPECHOSO en contexto bancario)
         for shortener in self.URL_SHORTENERS:
             if shortener in domain:
-                analysis['risk_score'] += 15
-                analysis['flags'].append('URL acortada (puede ocultar destino real)')
+                analysis['is_suspicious'] = True
+                analysis['risk_score'] += 45  # Aumentado de 15 a 45
+                analysis['flags'].append('⚠️ URL ACORTADA - Los bancos NUNCA usan acortadores de enlaces')
                 break
         
         # Verificar patrones sospechosos en dominio/path
@@ -315,6 +316,25 @@ class ImprovedSVMClassifier:
                 url_analysis = self.url_validator.validate_url(url)
                 result['url_analysis'].append(url_analysis)
         
+        # NUEVA LÓGICA: Detectar contexto bancario + URL acortada (PHISHING CRÍTICO)
+        text_lower = text.lower()
+        banking_keywords = [
+            'bancolombia', 'davivienda', 'bbva', 'banco', 'nequi', 'daviplata',
+            'cuenta', 'tarjeta', 'bloquead', 'suspendid', 'desactivad',
+            'actualiz', 'verificar', 'confirmar'
+        ]
+        
+        has_banking_context = any(keyword in text_lower for keyword in banking_keywords)
+        has_shortened_url = any('tinyurl' in url or 'bit.ly' in url or 't.co' in url or 'goo.gl' in url 
+                               for url in self.url_validator.extract_urls(text))
+        
+        # Si tiene contexto bancario + URL acortada = PHISHING CRÍTICO
+        if has_banking_context and has_shortened_url:
+            result['critical_red_flag'] = True
+            result['is_phishing_svm'] = True  # Forzar clasificación de phishing
+            result['confidence'] = max(result['confidence'], 0.95)  # Aumentar confianza
+            result['override_reason'] = '🚨 ALERTA CRÍTICA: Mensaje bancario con URL acortada (técnica común de phishing)'
+        
         # Veredicto final combinando SVM y URLs
         result['final_verdict'] = self._compute_final_verdict(result)
         
@@ -327,6 +347,7 @@ class ImprovedSVMClassifier:
         is_phishing_svm = analysis.get('is_phishing_svm', False)
         svm_confidence = analysis.get('confidence', 0.0)
         url_analysis = analysis.get('url_analysis', [])
+        critical_red_flag = analysis.get('critical_red_flag', False)
         
         # Inicializar veredicto
         verdict = {
@@ -337,8 +358,17 @@ class ImprovedSVMClassifier:
             'recommendations': []
         }
         
-        # Factor 1: Predicción SVM
-        if is_phishing_svm and svm_confidence > 0.75:
+        # PRIORIDAD 1: Flag crítico (contexto bancario + URL acortada)
+        if critical_red_flag:
+            verdict['is_scam'] = True
+            verdict['risk_level'] = 'CRÍTICO'
+            verdict['confidence'] = 0.98
+            verdict['main_reason'] = (
+                '🚨 PHISHING DETECTADO: Los bancos JAMÁS envían enlaces acortados. '
+                'Esta es una técnica clásica de estafa para ocultar el destino real del enlace.'
+            )
+        # Factor 2: Predicción SVM
+        elif is_phishing_svm and svm_confidence > 0.75:
             verdict['is_scam'] = True
             verdict['risk_level'] = 'ALTO'
             verdict['main_reason'] = 'El mensaje tiene características típicas de estafa/phishing'
@@ -346,7 +376,7 @@ class ImprovedSVMClassifier:
             verdict['risk_level'] = 'MEDIO'
             verdict['main_reason'] = 'El mensaje tiene algunos indicadores de posible estafa'
         
-        # Factor 2: URLs sospechosas
+        # Factor 3: URLs sospechosas
         has_critical_url = any(
             url['risk_level'] == 'CRÍTICO' for url in url_analysis
         )
@@ -398,6 +428,14 @@ class ImprovedSVMClassifier:
         report.append("="*60)
         report.append("🛡️ REPORTE DE ANÁLISIS DE SEGURIDAD")
         report.append("="*60)
+        
+        # ALERTA CRÍTICA si existe
+        if analysis.get('critical_red_flag'):
+            report.append("\n" + "🚨"*20)
+            report.append("⚠️ ALERTA CRÍTICA DETECTADA ⚠️")
+            report.append("🚨"*20)
+            report.append(f"\n{analysis.get('override_reason', '')}")
+            report.append("\n" + "🚨"*20)
         
         # Predicción SVM
         report.append("\n📊 ANÁLISIS DE CONTENIDO (SVM):")
