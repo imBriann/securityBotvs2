@@ -6,8 +6,18 @@ import os
 import sqlite3
 from typing import Optional, List, Dict
 from datetime import datetime, timedelta
-from app.storage.users_state import get_db_connection, setup_database
-from app.utils.config import DB_NAME
+from app.storage.users_state import get_db_connection, setup_database, db_update_user
+from app.utils.config import DB_NAME, ESTADO_ADMIN_REVISANDO, ESTADO_REGISTRADO
+from app.services.trainer import (
+    generate_retraining_report, 
+    analyze_feedback_quality,
+    get_retraining_summary
+)
+from app.storage.feedback_db import (
+    get_next_pending_negative_review,
+    mark_admin_decision,
+    count_pending_reviews
+)
 
 # Número de teléfono del administrador (sin el símbolo +)
 ADMIN_PHONE_NUMBER = "573505894033"
@@ -80,6 +90,11 @@ async def handle_admin_command(phone_number: str, command: str) -> Optional[str]
         "/clearimages": execute_clear_images_command,
         "/setstate": execute_set_state_command,
         "/health": execute_health_check_command,
+        "/feedback_stats": execute_feedback_stats_command,
+        "/retrain_report": execute_retrain_report_command,
+        "/review_negatives": execute_review_negatives_command,
+        "/do_retrain": execute_do_retrain_command,
+        "/revisar": execute_start_review_command,
     }
     
     if command_name in commands_map:
@@ -87,7 +102,10 @@ async def handle_admin_command(phone_number: str, command: str) -> Optional[str]
             return f"❌ El comando `{command_name}` requiere argumentos.\nUsa `/help` para más información."
         
         try:
-            if args:
+            # Comandos especiales que necesitan phone_number
+            if command_name == "/revisar":
+                return await commands_map[command_name](phone_number)
+            elif args:
                 return await commands_map[command_name](args)
             else:
                 return await commands_map[command_name]()
@@ -681,6 +699,13 @@ def get_admin_help_message() -> str:
         "• `/images` - Estadísticas de imágenes\n"
         "• `/health` - Estado de salud del sistema\n\n"
         
+        "*🧠 RLHF (Machine Learning Feedback):*\n"
+        "• `/feedback_stats` - Estadísticas de feedback del usuario\n"
+        "• `/retrain_report` - Reporte de reentrenamiento disponible\n"
+        "• `/review_negatives` - Ver casos marcados como incorrectos\n"
+        "• `/revisar` - 🆕 Modo de revisión interactiva (caso por caso)\n"
+        "• `/do_retrain` - Ejecutar reentrenamiento seguro\n\n"
+        
         "*🛠️ Gestión de Datos:*\n"
         "• `/export` - Exportar datos a texto\n"
         "• `/backup` - Crear backup de la BD\n"
@@ -697,3 +722,179 @@ def get_admin_help_message() -> str:
         
         f"_Admin: ···{ADMIN_PHONE_NUMBER[-4:]}_"
     )
+
+
+# ============================================================================
+# COMANDOS RLHF (Reinforcement Learning from Human Feedback)
+# ============================================================================
+
+async def execute_feedback_stats_command() -> str:
+    """
+    Muestra estadísticas de feedback del sistema RLHF.
+    
+    Returns:
+        Estadísticas de feedback formateadas
+    """
+    try:
+        summary = get_retraining_summary()
+        return summary
+    except Exception as e:
+        return f"❌ Error obteniendo estadísticas de feedback: {str(e)}"
+
+
+async def execute_retrain_report_command() -> str:
+    """
+    Genera un reporte detallado sobre el estado del reentrenamiento.
+    
+    Returns:
+        Reporte de reentrenamiento
+    """
+    try:
+        report = generate_retraining_report()
+        return f"```\n{report}\n```"
+    except Exception as e:
+        return f"❌ Error generando reporte: {str(e)}"
+
+
+async def execute_review_negatives_command(args: List[str] = None) -> str:
+    """
+    Muestra casos que los usuarios marcaron como incorrectos (dislikes).
+    Útil para auditoría manual.
+    
+    Args:
+        args: Argumentos opcionales [limite]
+    
+    Returns:
+        Lista de casos negativos sin revisar
+    """
+    try:
+        from app.storage.feedback_db import get_unreviewed_negatives
+        
+        limit = int(args[0]) if args and args[0].isdigit() else 10
+        negatives = get_unreviewed_negatives(limit)
+        
+        if not negatives:
+            return (
+                "✅ *SIN CASOS PROBLEMÁTICOS*\n\n"
+                "No hay dislikes sin revisar. ¡El bot ha sido muy acertado!"
+            )
+        
+        report = [f"⚠️ *CASOS MARCADOS COMO INCORRECTOS (Primeros {len(negatives)})*\n"]
+        
+        for i, case in enumerate(negatives, 1):
+            verdict = "ESTAFA" if case.get('final_is_scam') else "LEGÍTIMO"
+            msg_preview = case.get('message_content', 'N/A')[:60]
+            timestamp = case.get('feedback_timestamp', 'N/A')
+            
+            report.append(
+                f"\n*Caso {i}:*\n"
+                f"  ID: {case.get('id')}\n"
+                f"  Usuario: ···{case.get('phone_number', 'N/A')[-4:]}\n"
+                f"  Veredicto Bot: {verdict}\n"
+                f"  Mensaje: \"{msg_preview}...\"\n"
+                f"  Feedback: {timestamp}"
+            )
+        
+        report.append(
+            f"\n_Revisa estos casos manualmente y decide si el bot acertó o se equivocó._\n"
+            f"_Usa /help para ver cómo marcar como validado._"
+        )
+        
+        return "\n".join(report)
+    
+    except Exception as e:
+        return f"❌ Error revisando negativos: {str(e)}"
+
+
+async def execute_do_retrain_command() -> str:
+    """
+    Ejecuta el reentrenamiento del modelo SVM.
+    Implementa múltiples capas de seguridad para evitar data poisoning.
+    
+    Returns:
+        Resultado del reentrenamiento
+    """
+    try:
+        from app.services.trainer import execute_retraining
+        
+        print("🧠 Iniciando reentrenamiento...")
+        result = execute_retraining(force_unsafe=False)
+        
+        if result.get('success'):
+            return (
+                "🎯 *REENTRENAMIENTO INICIADO*\n\n"
+                f"✅ {result.get('message', 'Proceso iniciado')}\n\n"
+                "📝 *Instrucciones para completar:*\n"
+                "```\n"
+                "python -m app.scripts.retrain_svm\n"
+                "```\n\n"
+                "⏰ El proceso puede tomar 1-5 minutos dependiendo del volumen de datos."
+            )
+        else:
+            error = result.get('error', 'Error desconocido')
+            recommendation = result.get('recommendation', '')
+            
+            return (
+                f"❌ *NO SE PUEDE REENTRENAR AHORA*\n\n"
+                f"Razón: {error}\n\n"
+                f"💡 Recomendación: {recommendation}\n\n"
+                f"⚠️ Por seguridad, no entrenaremos con datos potencialmente envenenados."
+            )
+    
+    except Exception as e:
+        return f"❌ Error en reentrenamiento: {str(e)}"
+
+
+async def execute_start_review_command(phone_number: str) -> str:
+    """
+    Inicia el modo de revisión interactiva para el admin.
+    Obtiene el primer caso pendiente y entra en modo ESTADO_ADMIN_REVISANDO.
+    
+    Returns:
+        Mensaje con el primer caso a revisar
+    """
+    try:
+        # Contar pendientes
+        pending_count = count_pending_reviews()
+        
+        if pending_count == 0:
+            return (
+                "✅ *NO HAY REVISIONES PENDIENTES*\n\n"
+                "Todos los dislikes ya han sido auditados. ¡Excelente trabajo!"
+            )
+        
+        # Obtener el primer caso
+        caso = get_next_pending_negative_review()
+        
+        if not caso:
+            return "❌ Error obteniendo caso de revisión."
+        
+        # Cambiar estado del admin a REVISANDO
+        db_update_user(phone_number, {
+            "estado": ESTADO_ADMIN_REVISANDO,
+            "last_analyzed_url": str(caso['id'])  # Guardar ID del caso
+        })
+        
+        # Formatear mensaje
+        msg_preview = caso.get('message_content', 'N/A')[:300]
+        final_verdict = caso.get('final_verdict', 'DESCONOCIDO')
+        
+        msg = (
+            f"🕵️‍♂️ *CASO DE REVISIÓN #{caso['id']}*\n"
+            f"_({1} de {pending_count})_\n\n"
+            f"📩 *Mensaje del usuario:*\n"
+            f"_{msg_preview}_\n\n"
+            f"🤖 *Bot Veredicto:* {final_verdict}\n"
+            f"👤 *Usuario Respondió:* 👎 (No está de acuerdo)\n\n"
+            f"*¿El bot se equivocó realmente?*\n\n"
+            f"Responde:\n"
+            f"🔴 *SI* → El bot falló, usuario tenía razón\n"
+            f"🟢 *NO* → El bot estaba bien, usuario está equivocado\n"
+            f"🚪 *SALIR* → Terminar revisión"
+        )
+        
+        print(f"✅ Admin {phone_number} entra en modo revisión. Caso {caso['id']}")
+        return msg
+    
+    except Exception as e:
+        return f"❌ Error iniciando revisión: {str(e)}"

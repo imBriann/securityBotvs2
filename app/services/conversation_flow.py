@@ -6,11 +6,18 @@ from app.services.external_apis import send_whatsapp_message, analyze_with_deeps
 from app.services.admin_commands import handle_admin_command, is_admin, is_admin_command
 from app.services.svm_classifier import svm_classifier, initialize_svm
 from app.storage.users_state import db_update_user, db_get_user
+from app.storage.feedback_db import (
+    log_interaction, 
+    update_user_feedback,
+    mark_admin_decision,
+    get_next_pending_negative_review,
+    count_pending_reviews
+)
 from app.utils.preprocessing import normalize_text, extract_first_url
 from app.utils.config import (
     ESTADO_PENDIENTE_TERMINOS, ESTADO_PENDIENTE_NOMBRE, ESTADO_PENDIENTE_EDAD,
     ESTADO_PENDIENTE_CONOCIMIENTO, ESTADO_REGISTRADO, ESTADO_ESPERANDO_RESPUESTA_PHISHING,
-    ESTADO_ESPERANDO_MAS_DETALLES, SECURITY_TIPS
+    ESTADO_ESPERANDO_MAS_DETALLES, ESTADO_ADMIN_REVISANDO, SECURITY_TIPS
 )
 import random
 import uuid
@@ -56,12 +63,31 @@ async def handle_user_message(telefono_remitente: str, message_object: dict, mes
         await handle_reset_command(telefono_remitente, user_name)
         return
     
-    # Manejo de feedback
+    # === NUEVA LÓGICA DE FEEDBACK (RLHF) ===
     if message_type == "text" and text_recibido_original in ["👍", "👎"]:
-        if user_state == ESTADO_REGISTRADO:
-            print(f"FEEDBACK recibido de {telefono_remitente}: {text_recibido_original}")
-            await send_whatsapp_message(telefono_remitente, "¡Gracias por tu feedback! 😊")
+        feedback_tipo = "POSITIVO" if text_recibido_original == "👍" else "NEGATIVO"
+        updated = update_user_feedback(telefono_remitente, feedback_tipo)
+        
+        if updated:
+            if feedback_tipo == "POSITIVO":
+                await send_whatsapp_message(telefono_remitente, 
+                    "¡Gracias! 🧠✅ Me ayuda a saber que acerté. Tu feedback me ayuda a mejorar cada día.")
+            else:
+                await send_whatsapp_message(telefono_remitente, 
+                    "Entendido, tomaré nota de que pude haberme equivocado. 🧠⚠️\n\n"
+                    "Un humano revisará este caso para mejorar mi entrenamiento. Gracias por ayudarme a crecer.")
             return
+        else:
+            await send_whatsapp_message(telefono_remitente, 
+                "No tengo un análisis reciente para calificar. ¿Puedo ayudarte con algo más?")
+            return
+    # ================================
+    
+    # ===== INTERCEPTOR ESPECIAL PARA MODO REVISIÓN DE ADMINISTRADOR =====
+    if user_state == ESTADO_ADMIN_REVISANDO:
+        await handle_admin_review_flow(telefono_remitente, text_recibido_original, current_user)
+        return
+    # =====================================================================
     
     # Enrutamiento según estado del usuario
     if user_state == ESTADO_ESPERANDO_MAS_DETALLES:
@@ -412,6 +438,21 @@ async def handle_analizar_mensaje(telefono: str, mensaje: str, user_data: sqlite
             })
         
         db_update_user(telefono, db_updates)
+        
+        # === GUARDAR LOG PARA RLHF (Reinforcement Learning from Human Feedback) ===
+        final_verdict = {
+            'is_scam': svm_verdict['is_scam'],
+            'risk_level': svm_verdict['risk_level'],
+            'main_reason': svm_verdict['main_reason']
+        }
+        log_interaction(
+            phone=telefono,
+            msg=mensaje,
+            svm_res=svm_result,
+            deepseek_res=analisis_completo,
+            final_verdict=final_verdict
+        )
+        # ====================================================================
         
         # Log para debugging
         print(f"✅ Análisis híbrido completado para {telefono}")
@@ -767,3 +808,91 @@ async def handle_post_phishing_response(telefono: str, text: str, user_data: sql
         print(f"DEBUG: Respuesta no clasificada ({decision_usuario}) en ESPERANDO_RESPUESTA_PHISHING para {telefono}")
         await send_whatsapp_message(telefono, 
             f"🤔 {nombre_usuario}, no estoy seguro de haber entendido tu respuesta. Por favor responde con *SÍ*, *NO*, o escribe *AYUDA*. ¡Gracias!")
+
+async def handle_admin_review_flow(telefono_remitente: str, text_recibido: str, current_user: sqlite3.Row):
+    """Maneja el bucle interactivo de revisión de casos negativos para administradores"""
+    
+    try:
+        # Normalizar entrada
+        normalized_input = normalize_text(text_recibido).upper()
+        
+        # Definir patrones de respuesta
+        yes_patterns = ["SÍ", "SI", "YES", "S", "CORRECTO", "BIEN", "OK", "ACERTADO"]
+        no_patterns = ["NO", "N", "MAL", "INCORRECTO", "ERROR", "EQUIVOCADO", "FALLIDO"]
+        exit_patterns = ["SALIR", "CANCELAR", "DONE", "TERMINADO", "LISTO"]
+        
+        # Obtener ID del caso actual desde last_analyzed_url
+        case_id = current_user["last_analyzed_url"] if current_user else None
+        if not case_id:
+            await send_whatsapp_message(telefono_remitente, 
+                "⚠️ No tengo registro del caso que estás revisando. Por favor inicia de nuevo con `/revisar`.")
+            db_update_user(telefono_remitente, {"estado": ESTADO_REGISTRADO, "last_analyzed_url": None})
+            return
+        
+        # Verificar si usuario quiere salir
+        if any(exit in normalized_input for exit in exit_patterns):
+            await send_whatsapp_message(telefono_remitente, 
+                "✋ Revisión finalizada. Volviendo al estado normal. ¿En qué te puedo ayudar?")
+            db_update_user(telefono_remitente, {"estado": ESTADO_REGISTRADO, "last_analyzed_url": None})
+            return
+        
+        # Procesar decisión del administrador
+        if any(yes in normalized_input for yes in yes_patterns):
+            # Bot estaba equivocado
+            bot_was_wrong = True
+            decision_text = "❌ Bot estaba EQUIVOCADO"
+        elif any(no in normalized_input for no in no_patterns):
+            # Bot estaba correcto
+            bot_was_wrong = False
+            decision_text = "✅ Bot estaba CORRECTO"
+        else:
+            # Respuesta inválida
+            await send_whatsapp_message(telefono_remitente, 
+                "❓ No entendí tu respuesta. Por favor responde con:\n"
+                "• *SÍ* (bot estaba equivocado)\n"
+                "• *NO* (bot estaba correcto)\n"
+                "• *SALIR* (finalizar revisión)")
+            return
+        
+        # Guardar decisión del administrador
+        mark_admin_decision(case_id, bot_was_wrong=bot_was_wrong)
+        print(f"✅ Decisión guardada para caso {case_id}: bot_was_wrong={bot_was_wrong}")
+        
+        # Obtener siguiente caso pendiente
+        next_case = get_next_pending_negative_review()
+        
+        if next_case:
+            # Actualizar usuario con nuevo caso y mostrar siguiente
+            db_update_user(telefono_remitente, {"last_analyzed_url": str(next_case["id"])})
+            
+            # Contar total de pendientes
+            pending_count = count_pending_reviews()
+            cases_processed = next_case["id"]  # Aproximado
+            
+            mensaje_siguiente = (
+                f"🕵️‍♂️ CASO DE REVISIÓN #{next_case['id']}\n"
+                f"({cases_processed} de ~{cases_processed + pending_count})\n\n"
+                f"👤 Usuario: {next_case['user_phone'][:4]}****{next_case['user_phone'][-4:]}\n"
+                f"💬 Mensaje: \"{next_case['original_user_message'][:100]}...\"\n"
+                f"🤖 Veredicto del bot: *{next_case['bot_verdict']}*\n"
+                f"😞 Usuario opinó: El bot se equivocó\n\n"
+                f"*¿El bot realmente se equivocó?*\n"
+                f"• SI - Bot estaba equivocado\n"
+                f"• NO - Bot estaba correcto\n"
+                f"• SALIR - Finalizar revisión"
+            )
+            await send_whatsapp_message(telefono_remitente, mensaje_siguiente)
+        else:
+            # No hay más casos, finalizar revisión
+            await send_whatsapp_message(telefono_remitente, 
+                "🎉 ¡Excelente! Has completado la revisión de todos los casos pendientes.\n\n"
+                f"📊 Decisión guardada: {decision_text}\n\n"
+                "Volviendo al estado normal. ¿En qué puedo ayudarte?")
+            db_update_user(telefono_remitente, {"estado": ESTADO_REGISTRADO, "last_analyzed_url": None})
+    
+    except Exception as e:
+        print(f"❌ Error en handle_admin_review_flow para {telefono_remitente}: {e}")
+        await send_whatsapp_message(telefono_remitente, 
+            f"⚠️ Ocurrió un error durante la revisión: {str(e)}\n\n"
+            "Por favor intenta de nuevo con `/revisar`.")
+        db_update_user(telefono_remitente, {"estado": ESTADO_REGISTRADO, "last_analyzed_url": None})
