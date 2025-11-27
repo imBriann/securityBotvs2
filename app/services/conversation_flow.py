@@ -3,6 +3,7 @@ import os
 import re
 import sqlite3
 from app.services.external_apis import send_whatsapp_message, analyze_with_deepseek
+from app.services.admin_commands import handle_admin_command, is_admin, is_admin_command
 # from app.services.svm_classifier import extract_first_url
 from app.storage.users_state import db_update_user, db_get_user
 from app.utils.preprocessing import normalize_text, extract_first_url
@@ -31,6 +32,20 @@ async def handle_user_message(telefono_remitente: str, message_object: dict, mes
     user_name = current_user["nombre"] if current_user and current_user["nombre"] else "tú"
     
     print(f"DEBUG: Handler para {telefono_remitente}, Estado: {user_state}")
+    
+    # ===== VERIFICACIÓN DE COMANDOS ADMINISTRATIVOS (PRIORIDAD MÁXIMA) =====
+    if message_type == "text" and is_admin_command(text_recibido_original):
+        print(f"🔧 Detectado posible comando admin: {text_recibido_original[:20]}")
+        admin_response = await handle_admin_command(telefono_remitente, text_recibido_original)
+        if admin_response:
+            print(f"✅ Comando admin ejecutado para {telefono_remitente}")
+            await send_whatsapp_message(telefono_remitente, admin_response)
+            return
+        elif is_admin(telefono_remitente):
+            await send_whatsapp_message(telefono_remitente, 
+                "❌ Comando no reconocido. Usa `/help` para ver comandos disponibles.")
+            return
+    # ===== FIN DE COMANDOS ADMINISTRATIVOS =====
     
     # Detectar comandos de reset
     normalized_text = normalize_text(text_recibido_original)
