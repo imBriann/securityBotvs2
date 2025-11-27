@@ -283,26 +283,32 @@ async def handle_text_message(telefono: str, text: str, user_data: sqlite3.Row):
         await handle_meta_pregunta(telefono, cleaned_text, nombre_usuario)
     
     elif intencion == "solicitar_tip_seguridad":
-        await handle_solicitar_tip(telefono, nombre_usuario)
+        await handle_solicitar_consejo(telefono, nombre_usuario)
     
     else:
-        await handle_intencion_no_clara(telefono, nombre_usuario, intencion, cleaned_text)
+        await handle_intencion_desconocida(telefono, nombre_usuario, intencion, cleaned_text)
 
 async def handle_saludo(telefono: str, nombre_usuario: str, user_data: sqlite3.Row):
     """Maneja saludos del usuario"""
-    # CORRECCIÓN: Convertimos el objeto Row a diccionario real para usar .get()
     user_dict = dict(user_data)
     
-    greeting = f"¡Hola de nuevo, {nombre_usuario}! 👋"
-    last_interaction_info = ""
+    # Personalizar saludo según contexto
+    greeting_options = [
+        f"¡Hola de nuevo, {nombre_usuario}! 👋",
+        f"¡Hey {nombre_usuario}! 😊",
+        f"¡Qué tal, {nombre_usuario}! 👋",
+    ]
     
-    # Ahora usamos user_dict en lugar de user_data para usar .get()
-    if user_dict.get("last_image_timestamp"):
-        last_interaction_info = " La última vez que interactuamos fue sobre un análisis reciente."
-    elif user_dict.get("last_analyzed_url"):
-        last_interaction_info = " Recientemente analizamos un enlace."
+    greeting = random.choice(greeting_options)
     
-    greeting += last_interaction_info + " ¿En qué te puedo ayudar hoy? 😊"
+    # Agregar contexto si hay interacciones previas
+    if user_dict.get("last_analyzed_url"):
+        greeting += f" ¿Listo para analizar otro mensaje?"
+    elif user_dict.get("last_image_timestamp"):
+        greeting += f" ¿Necesitas ayuda con algo?"
+    else:
+        greeting += f" ¿En qué te puedo ayudar hoy?"
+    
     await send_whatsapp_message(telefono, greeting)
 
 async def handle_analizar_mensaje(telefono: str, mensaje: str, user_data: sqlite3.Row, image_context: dict = None):
@@ -347,52 +353,146 @@ async def handle_analizar_mensaje(telefono: str, mensaje: str, user_data: sqlite
             f"Lo siento mucho, {nombre_usuario}, tuve un problema al intentar analizar tu mensaje. ¿Podrías intentarlo de nuevo un poco más tarde, por favor? 🙏")
 
 async def handle_pregunta_seguridad(telefono: str, pregunta: str, user_profile: dict, nombre_usuario: str):
-    """Maneja preguntas sobre seguridad"""
+    """Maneja preguntas sobre ciberseguridad"""
     await send_whatsapp_message(telefono, 
-        f"🤔 ¡Buena pregunta sobre seguridad, {nombre_usuario}! Déjame consultar mis datos para darte la mejor respuesta. Un momento, por favor... 💡")
+        f"🤔 ¡Buena pregunta sobre seguridad, {nombre_usuario}! "
+        f"Déjame consultar para darte la mejor respuesta posible... 💡")
     
     respuesta = await analyze_with_deepseek(pregunta, "cyber_pregunta", user_profile)
     
     if respuesta:
         await send_whatsapp_message(telefono, respuesta)
-        await send_whatsapp_message(telefono, f"Espero que esta información te sea útil, {nombre_usuario}. 👍")
+        
+        # Ofrecer recursos adicionales
+        await send_whatsapp_message(telefono, 
+            f"¿Esta información te ayudó, {nombre_usuario}? "
+            f"Si tienes más dudas o quieres un consejo práctico, ¡solo pregúntame! 😊")
     else:
         await send_whatsapp_message(telefono, 
-            f"Mis disculpas, {nombre_usuario}. Parece que tuve un inconveniente al procesar tu pregunta de seguridad. ¿Podrías intentar reformularla? Gracias por tu paciencia. 😊")
+            f"Mis disculpas, {nombre_usuario}. Tuve un inconveniente técnico. "
+            f"¿Podrías reformular tu pregunta o intentarlo de nuevo? 🙏")
 
 async def handle_meta_pregunta(telefono: str, pregunta: str, nombre_usuario: str):
-    """Maneja preguntas sobre el bot"""
+    """Maneja preguntas sobre el bot y sus capacidades"""
     normalized_pregunta = normalize_text(pregunta)
     
-    if "imagen" in normalized_pregunta and ("puedo" in normalized_pregunta or "enviar" in normalized_pregunta):
+    # Detectar tipo específico de pregunta
+    if any(word in normalized_pregunta for word in ["que haces", "que puedes hacer", "para que sirves", "quien eres", "que eres"]):
         await send_whatsapp_message(telefono, 
-            f"¡Claro que sí, {nombre_usuario}! Puedes enviarme imágenes que te parezcan sospechosas y las analizaré para ti. 🖼️👍")
-    elif "que haces" in normalized_pregunta or "para que sirves" in normalized_pregunta:
+            f"👋 ¡Hola, {nombre_usuario}! Soy *SecurityBot-WA*, tu asistente de ciberseguridad.\n\n"
+            f"🎯 *Mis capacidades:*\n\n"
+            f"🔍 *Analizar contenido sospechoso*\n"
+            f"  • Mensajes de texto con enlaces\n"
+            f"  • Imágenes con texto (OCR)\n"
+            f"  • Capturas de pantalla\n\n"
+            f"🛡️ *Responder preguntas*\n"
+            f"  • ¿Qué es el phishing?\n"
+            f"  • ¿Cómo proteger mis cuentas?\n"
+            f"  • ¿Es seguro este enlace?\n\n"
+            f"💡 *Darte consejos*\n"
+            f"  • Tips de seguridad\n"
+            f"  • Mejores prácticas\n"
+            f"  • Prevención de estafas\n\n"
+            f"🆘 *Ayuda en emergencias*\n"
+            f"  • Pasos si caíste en una estafa\n"
+            f"  • Qué hacer si te hackearon\n\n"
+            f"¿En qué te puedo ayudar hoy? 😊")
+    
+    elif any(word in normalized_pregunta for word in ["imagen", "foto", "captura", "screenshot", "picture"]):
         await send_whatsapp_message(telefono, 
-            f"Soy SecurityBot-WA, {nombre_usuario}. Estoy aquí para ayudarte a analizar mensajes de texto o imágenes que te parezcan sospechosas de ser estafas o phishing. También puedo responder tus preguntas sobre ciberseguridad. 😊")
-    elif "audio" in normalized_pregunta and "entiendes" in normalized_pregunta:
+            f"📸 ¡Sí, {nombre_usuario}! Puedo analizar imágenes.\n\n"
+            f"*¿Qué tipo de imágenes?*\n"
+            f"✅ Capturas de mensajes sospechosos\n"
+            f"✅ Fotos de pantallas con texto\n"
+            f"✅ Publicaciones dudosas\n"
+            f"✅ Promociones que parezcan falsas\n\n"
+            f"Uso *OCR (reconocimiento de texto)* para leer el contenido y analizarlo. "
+            f"¡Envíame la imagen cuando quieras! 🖼️")
+    
+    elif any(word in normalized_pregunta for word in ["audio", "voz", "nota de voz", "grabacion"]):
         await send_whatsapp_message(telefono, 
-            f"¡Hola, {nombre_usuario}! Por el momento, mi especialidad son los mensajes de texto e imágenes. Aún estoy aprendiendo a procesar audios, ¡pero espero poder ayudarte con ellos muy pronto! 😊")
+            f"🎤 {nombre_usuario}, actualmente *no proceso audios* directamente.\n\n"
+            f"*Alternativas:*\n"
+            f"1️⃣ Transcribe el audio a texto y envíamelo\n"
+            f"2️⃣ Toma una captura si es un mensaje de voz\n"
+            f"3️⃣ Cuéntame de qué trata y te asesoro\n\n"
+            f"¡Espero poder procesar audios pronto! 😊")
+    
+    elif any(word in normalized_pregunta for word in ["como uso", "como funciona", "como te uso", "instrucciones"]):
+        await send_whatsapp_message(telefono, 
+            f"📖 *Guía Rápida de Uso*\n\n"
+            f"*Para analizar un mensaje:*\n"
+            f"1. Simplemente reenvíamelo o cópialo\n"
+            f"2. Yo lo analizaré automáticamente\n"
+            f"3. Te daré un veredicto y recomendaciones\n\n"
+            f"*Para hacer preguntas:*\n"
+            f"Solo escribe tu duda, por ejemplo:\n"
+            f"• '¿Qué es el phishing?'\n"
+            f"• '¿Cómo protejo mi WhatsApp?'\n\n"
+            f"*Para consejos:*\n"
+            f"Pídeme un consejo y te daré uno al azar 💡\n\n"
+            f"¡Es muy sencillo, {nombre_usuario}! ¿Probamos? 😊")
+    
+    elif any(word in normalized_pregunta for word in ["gratis", "costo", "precio", "pago", "cobrar"]):
+        await send_whatsapp_message(telefono, 
+            f"💰 ¡Excelente pregunta, {nombre_usuario}!\n\n"
+            f"✅ *Completamente GRATUITO*\n\n"
+            f"Este servicio es sin costo para ayudar a la comunidad colombiana a "
+            f"navegar más seguro en internet. No hay tarifas ocultas ni pagos.\n\n"
+            f"¡Úsame todas las veces que necesites! 🛡️")
+    
+    elif any(word in normalized_pregunta for word in ["datos", "privacidad", "informacion", "seguro usar"]):
+        await send_whatsapp_message(telefono, 
+            f"🔒 *Sobre tu privacidad, {nombre_usuario}:*\n\n"
+            f"✅ Tus mensajes se analizan y NO se comparten\n"
+            f"✅ Guardo solo: nombre, edad, nivel de conocimiento\n"
+            f"✅ Cumplimos con la Ley 1581 de 2012 (Colombia)\n"
+            f"✅ Nunca vendo ni comparto tu información\n\n"
+            f"Tu seguridad y privacidad son mi prioridad. 💙")
+    
+    elif any(word in normalized_pregunta for word in ["creador", "quien te creo", "desarrollador", "quien te hizo"]):
+        await send_whatsapp_message(telefono, 
+            f"👨‍💻 Fui desarrollado como un proyecto de seguridad cibernética "
+            f"para ayudar a usuarios en Colombia a identificar estafas y phishing.\n\n"
+            f"Uso inteligencia artificial (DeepSeek) para analizar mensajes y "
+            f"tecnología OCR para leer imágenes.\n\n"
+            f"¿Te gustaría saber algo más sobre cómo funciono? 😊")
+    
     else:
+        # Respuesta genérica para otras preguntas sobre el bot
         await send_whatsapp_message(telefono, 
-            f"Entendido, {nombre_usuario}. Si tienes un mensaje o imagen para analizar, ¡envíamelo! O si tienes una pregunta sobre ciberseguridad o quieres un consejo, también puedo ayudarte con eso. 😊")
+            f"🤖 Soy SecurityBot-WA, {nombre_usuario}.\n\n"
+            f"*En resumen, puedo:*\n"
+            f"• 🔍 Analizar mensajes e imágenes sospechosas\n"
+            f"• 🛡️ Responder preguntas de ciberseguridad\n"
+            f"• 💡 Darte consejos de protección\n"
+            f"• 🆘 Ayudarte si caíste en una estafa\n\n"
+            f"¿Sobre qué aspecto específico quieres saber más? "
+            f"O simplemente envíame algo para analizar. 😊")
 
-async def handle_solicitar_tip(telefono: str, nombre_usuario: str):
+async def handle_solicitar_consejo(telefono: str, nombre_usuario: str):
     """Maneja solicitud de consejos de seguridad"""
     tip = random.choice(SECURITY_TIPS)
     await send_whatsapp_message(telefono, 
-        f"¡Claro, {nombre_usuario}! Aquí tienes un consejo de seguridad para ti:\n\n{tip}\n\nEspero te sea útil. 😊")
+        f"💡 *Consejo de Seguridad para {nombre_usuario}:*\n\n"
+        f"{tip}\n\n"
+        f"¿Quieres otro consejo? Solo pídemelo. También puedo responder "
+        f"preguntas específicas sobre seguridad. 😊")
 
-async def handle_intencion_no_clara(telefono: str, nombre_usuario: str, intencion: str, texto: str):
-    """Maneja intenciones no claras o irrelevantes"""
-    print(f"Intención clasificada como '{intencion}' para '{texto[:50]}...' de {nombre_usuario}.")
+async def handle_intencion_desconocida(telefono: str, nombre_usuario: str, intencion: str, texto: str):
+    """Maneja intenciones no reconocidas o errores de clasificación"""
+    print(f"⚠️ INTENCIÓN NO RECONOCIDA: '{intencion}' para '{texto[:50]}...' de {nombre_usuario} ({telefono})")
+    
     await send_whatsapp_message(telefono, 
-        f"Vaya, {nombre_usuario}, no estoy completamente seguro de cómo ayudarte con eso. 🤔\n"
-        f"Recuerda que puedo:\n"
-        f"1. Analizar un mensaje o imagen sospechosa 🔍\n"
-        f"2. Responder preguntas sobre ciberseguridad 🛡️\n"
-        f"3. Darte un consejo de seguridad ráp💡\n\n"
-        f"¿Qué te gustaría hacer?")
+        f"🤔 {nombre_usuario}, no estoy completamente seguro de cómo ayudarte con eso.\n\n"
+        f"*Puedo asistirte con:*\n\n"
+        f"1️⃣ *Analizar contenido sospechoso*\n"
+        f"   Envíame mensajes, enlaces o imágenes dudosas\n\n"
+        f"2️⃣ *Responder preguntas de seguridad*\n"
+        f"   Ej: '¿Qué es el phishing?'\n\n"
+        f"3️⃣ *Darte consejos prácticos*\n"
+        f"   Solo pídeme un tip de seguridad\n\n"
+        f"¿Cuál de estas opciones te interesa?")
 async def handle_image_message(telefono: str, message_object: dict, user_data: sqlite3.Row):
     """Maneja mensajes de imagen"""
     nombre_usuario = user_data["nombre"] if user_data and user_data["nombre"] else "tú"
