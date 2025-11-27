@@ -37,19 +37,20 @@ class URLValidator:
         'rappi.com.co', 'ifood.com.co', 'ubereats.com',
         
         # Telecomunicaciones
-        'claro.com.co', 'movistar.co', 'tigo.com.co', 'wom.co',
+        'claro.com.co', 'movistar.co', 'tigo.com.co', 'wom.co', 'virginmobile.co', 'virg.in',
         
         # Streaming
         'netflix.com', 'spotify.com', 'primevideo.com', 'disneyplus.com',
         
         # Educación
         'sena.edu.co', 'senasofiaplus.edu.co', 'unal.edu.co', 'icfes.gov.co',
+        'unipamplona.edu.co', 'unandes.edu.co', 'javeriana.edu.co', 'mineducacion.gov.co',
         
         # Transporte
         'avianca.com', 'latam.com', 'wingo.com', 'transmilenio.gov.co',
         
         # Redes sociales y comunicación
-        'whatsapp.com', 'facebook.com', 'instagram.com', 'twitter.com',
+        'whatsapp.com', 'facebook.com', 'instagram.com', 'x.com',
         'linkedin.com', 'telegram.org'
     }
     
@@ -147,6 +148,12 @@ class URLValidator:
             analysis['risk_score'] += 15
             analysis['flags'].append('Múltiples guiones en dominio')
         
+        # BONIFICACIÓN DE CONFIANZA: Dominios educativos y gubernamentales
+        # Reduce el riesgo automáticamente porque estos dominios son verificados por el estado
+        if domain.endswith('.edu.co') or domain.endswith('.gov.co'):
+            analysis['risk_score'] = max(0, analysis['risk_score'] - 30)  # Reducir riesgo
+            analysis['flags'].append("✅ Dominio institucional (.edu/.gov) - Genera confianza")
+        
         # Clasificación final
         if analysis['risk_score'] >= 50:
             analysis['is_suspicious'] = True
@@ -216,7 +223,7 @@ class ImprovedSVMClassifier:
         """
         self.model = None
         self.model_data = None
-        self.model_path = model_path or "models/svm_phishing_model.pkl"
+        self.model_path = model_path or "app/models/svm_phishing_model.pkl"
         self.url_validator = URLValidator()
         
     def load_model(self) -> bool:
@@ -342,12 +349,20 @@ class ImprovedSVMClassifier:
     
     def _compute_final_verdict(self, analysis: Dict) -> Dict:
         """
-        Computa el veredicto final basado en SVM y análisis de URLs.
+        Computa el veredicto final con 'Lógica de Freno de Mano' para evitar Falsos Positivos.
+        
+        CONCEPTO: Si el SVM es agresivo pero las URLs son seguras (especialmente dominios educativos/gubernamentales),
+        bajamos la alarma de CRÍTICO/ALTO a MEDIO/BAJO para evitar falsos positivos.
         """
         is_phishing_svm = analysis.get('is_phishing_svm', False)
         svm_confidence = analysis.get('confidence', 0.0)
         url_analysis = analysis.get('url_analysis', [])
         critical_red_flag = analysis.get('critical_red_flag', False)
+        
+        # Evaluar si todas las URLs son seguras (riesgo BAJO)
+        urls_are_safe = False
+        if url_analysis:
+            urls_are_safe = all(u['risk_level'] == 'BAJO' for u in url_analysis)
         
         # Inicializar veredicto
         verdict = {
@@ -358,7 +373,7 @@ class ImprovedSVMClassifier:
             'recommendations': []
         }
         
-        # PRIORIDAD 1: Flag crítico (contexto bancario + URL acortada)
+        # CASO 1: ALERTA CRÍTICA (Bancos + URL Acortada) - Esto sigue siendo prioritario SIN EXCEPCIONES
         if critical_red_flag:
             verdict['is_scam'] = True
             verdict['risk_level'] = 'CRÍTICO'
@@ -367,16 +382,30 @@ class ImprovedSVMClassifier:
                 '🚨 PHISHING DETECTADO: Los bancos JAMÁS envían enlaces acortados. '
                 'Esta es una técnica clásica de estafa para ocultar el destino real del enlace.'
             )
-        # Factor 2: Predicción SVM
+        
+        # CASO 2: SVM dice ESTAFA pero URLs parecen SEGURAS (Posible Falso Positivo)
+        # ESTA ES LA CORRECCIÓN CLAVE PARA EL OVERFITTING DEL SVM
+        elif is_phishing_svm and urls_are_safe:
+            # En lugar de confiar ciegamente en el SVM, bajamos la alarma
+            verdict['is_scam'] = False
+            verdict['risk_level'] = 'MEDIO'  # Bajamos de ALTO/CRÍTICO a MEDIO
+            verdict['confidence'] = 0.45  # Bajamos la confianza del SVM artificialmente
+            verdict['main_reason'] = (
+                'El sistema detectó patrones inusuales en el texto, pero el enlace parece legítimo. '
+                'Podría ser un falso positivo, pero verifica con precaución.'
+            )
+        
+        # CASO 3: Predicción SVM pura (solo si no hay contradicción con URLs seguras)
         elif is_phishing_svm and svm_confidence > 0.75:
             verdict['is_scam'] = True
             verdict['risk_level'] = 'ALTO'
-            verdict['main_reason'] = 'El mensaje tiene características típicas de estafa/phishing'
+            verdict['main_reason'] = 'El análisis de patrones de texto coincide con campañas de estafa conocidas.'
+            
         elif is_phishing_svm and svm_confidence > 0.6:
             verdict['risk_level'] = 'MEDIO'
-            verdict['main_reason'] = 'El mensaje tiene algunos indicadores de posible estafa'
+            verdict['main_reason'] = 'El mensaje contiene lenguaje comúnmente usado en spam o estafas.'
         
-        # Factor 3: URLs sospechosas
+        # CASO 4: URLs explícitamente maliciosas (tienen prioridad sobre predicción negativa del SVM)
         has_critical_url = any(
             url['risk_level'] == 'CRÍTICO' for url in url_analysis
         )
@@ -387,13 +416,13 @@ class ImprovedSVMClassifier:
         if has_critical_url:
             verdict['is_scam'] = True
             verdict['risk_level'] = 'CRÍTICO'
-            verdict['main_reason'] = 'Contiene URLs altamente sospechosas'
+            verdict['main_reason'] = 'Se detectaron enlaces clasificados como peligrosos o maliciosos.'
         elif has_high_risk_url and is_phishing_svm:
             verdict['is_scam'] = True
             verdict['risk_level'] = 'ALTO'
             verdict['main_reason'] = 'Combinación de contenido sospechoso y URLs de riesgo'
         
-        # Generar recomendaciones
+        # Generar recomendaciones según riesgo
         if verdict['is_scam']:
             verdict['recommendations'] = [
                 '🚫 NO hacer clic en ningún enlace del mensaje',
@@ -402,12 +431,16 @@ class ImprovedSVMClassifier:
                 '📞 Si es de un banco/entidad, contactar directamente por canales oficiales',
                 '⚠️ Reportar el número/remitente como spam'
             ]
+        elif verdict['risk_level'] == 'MEDIO':
+            verdict['recommendations'] = [
+                '🔍 Verificar la fuente oficial manualmente',
+                '⚠️ No ingresar datos personales si tienes dudas',
+                'ℹ️ Confirmar la veracidad por otro canal'
+            ]
         else:
             verdict['recommendations'] = [
-                '🔍 Siempre verificar el remitente antes de actuar',
-                '⚠️ No compartir información sensible por mensajes',
-                '🔗 Verificar URLs antes de hacer clic',
-                '📞 En caso de duda, contactar a la entidad por canales oficiales'
+                '✅ Puedes proceder, pero siempre mantente alerta',
+                '🔗 Verifica que la URL en el navegador coincida con la institución'
             ]
         
         return verdict

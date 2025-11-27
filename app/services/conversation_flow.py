@@ -4,7 +4,7 @@ import re
 import sqlite3
 from app.services.external_apis import send_whatsapp_message, analyze_with_deepseek
 from app.services.admin_commands import handle_admin_command, is_admin, is_admin_command
-# from app.services.svm_classifier import extract_first_url
+from app.services.svm_classifier import svm_classifier, initialize_svm
 from app.storage.users_state import db_update_user, db_get_user
 from app.utils.preprocessing import normalize_text, extract_first_url
 from app.utils.config import (
@@ -312,27 +312,91 @@ async def handle_saludo(telefono: str, nombre_usuario: str, user_data: sqlite3.R
     await send_whatsapp_message(telefono, greeting)
 
 async def handle_analizar_mensaje(telefono: str, mensaje: str, user_data: sqlite3.Row, image_context: dict = None):
-    """Maneja la solicitud de análisis de mensaje"""
+    """
+    Maneja la solicitud de análisis de mensaje con LÓGICA HÍBRIDA (SVM Local + DeepSeek IA).
+    
+    El flujo es:
+    1. Ejecutar SVM local para análisis técnico rápido
+    2. Inyectar resultado del SVM en la pregunta a DeepSeek
+    3. DeepSeek actúa como "juez" que combina análisis técnico + humanístico
+    4. Mostrar resumen corto primero, guardar detalles para después
+    """
     nombre_usuario = user_data["nombre"] if user_data and user_data["nombre"] else "tú"
     
     await send_whatsapp_message(telefono, 
-        f"🔍 ¡Entendido, {nombre_usuario}! Estoy revisando el mensaje que me enviaste. Te aviso en un momento con mi análisis... 👍")
+        f"🔍 Analizando mensaje con doble verificación (IA + Detección Técnica)... dame unos segundos, {nombre_usuario}.")
+    
+    # ========== PASO 1: ANÁLISIS TÉCNICO LOCAL (SVM) ==========
+    # Aseguramos que el modelo SVM esté cargado
+    if not svm_classifier.model:
+        print("⚠️ Modelo SVM no estaba cargado, inicializando...")
+        initialize_svm()
+    
+    # Ejecutamos el análisis SVM
+    svm_result = svm_classifier.analyze_message(mensaje)
+    svm_verdict = svm_result['final_verdict']
+    
+    # Preparamos un reporte técnico legible para DeepSeek
+    detalles_tecnicos = (
+        f"📊 REPORTE TÉCNICO (Detección Local SVM):\n"
+        f"• Nivel de Riesgo: {svm_verdict['risk_level']}\n"
+        f"• Confianza del Modelo: {svm_result['confidence']*100:.1f}%\n"
+        f"• Clasificación: {'PHISHING/ESTAFA DETECTADO' if svm_verdict['is_scam'] else 'PARECE LEGÍTIMO'}\n"
+        f"• Razón Principal: {svm_verdict['main_reason']}\n"
+    )
+    
+    # Agregar análisis de URLs si existen
+    if svm_result['url_analysis']:
+        detalles_tecnicos += f"\n📍 ANÁLISIS DE ENLACES:\n"
+        for url_data in svm_result['url_analysis']:
+            detalles_tecnicos += f"   • URL: {url_data['url'][:40]}...\n"
+            detalles_tecnicos += f"   • Riesgo: {url_data['risk_level']}\n"
+    
+    # Si hay alerta crítica, la marcamos
+    if svm_result.get('critical_red_flag'):
+        detalles_tecnicos += f"\n🚨 ALERTA CRÍTICA: {svm_result.get('override_reason', '')}\n"
+    
+    # ========== PASO 2: CONSTRUCCIÓN DEL PROMPT HÍBRIDO ==========
+    # Combinamos el mensaje original + lo que opinó el SVM
+    prompt_combinado = (
+        f"MENSAJE A ANALIZAR:\n"
+        f"'''{mensaje}'''\n\n"
+        f"─────────────────────────────────────\n"
+        f"{detalles_tecnicos}\n"
+        f"─────────────────────────────────────\n\n"
+        f"INSTRUCCIÓN: Actúa como juez final. Combina el análisis técnico anterior con tu "
+        f"análisis humanístico del texto (ingenería social, urgencia, manipulación). "
+        f"Emite un veredicto definitivo sobre si este es phishing/estafa o legítimo."
+    )
     
     extracted_url = extract_first_url(mensaje)
     if not extracted_url and image_context and image_context.get("ocr_text_original"):
         extracted_url = extract_first_url(image_context.get("ocr_text_original"))
 
     user_profile_dict = dict(user_data)
-    analisis_completo = await analyze_with_deepseek(mensaje, "phishing", user_profile_dict)
+    
+    # ========== PASO 3: CONSULTA A DEEPSEEK (Juez Final) ==========
+    analisis_completo = await analyze_with_deepseek(prompt_combinado, "phishing", user_profile_dict)
 
     if analisis_completo:
+        # Separamos el veredicto corto de los detalles largos
         partes = analisis_completo.split("---DETALLES_SIGUEN---", 1)
         resumen_breve = partes[0].strip()
-        detalles_completos = partes[1].strip() if len(partes) > 1 else ""
+        # Si DeepSeek falló en poner el separador, usamos todo el texto como resumen
+        detalles_completos = partes[1].strip() if len(partes) > 1 else analisis_completo
 
+        # ========== PASO 4: ENVIAR VEREDICTO CORTO ==========
         await send_whatsapp_message(telefono, resumen_breve)
-        await send_whatsapp_message(telefono, f"{nombre_usuario}, ¿quieres que te dé más detalles y mis recomendaciones sobre esto? 😊")
+        
+        # Pequeña pausa para mejor UX
+        await asyncio.sleep(0.5)
+        
+        # ========== PASO 5: INVITAR A VER DETALLES ==========
+        await send_whatsapp_message(telefono, 
+            f"📋 {nombre_usuario}, tengo un informe técnico detallado explicando por qué llegamos a esta conclusión.\n\n"
+            "¿Quieres ver el **análisis completo**? (Responde SÍ o NO)")
 
+        # ========== PASO 6: ACTUALIZAR ESTADO Y GUARDAR CONTEXTO ==========
         db_updates = {
             "estado": ESTADO_ESPERANDO_MAS_DETALLES,
             "last_analysis_details": detalles_completos,
@@ -348,9 +412,21 @@ async def handle_analizar_mensaje(telefono: str, mensaje: str, user_data: sqlite
             })
         
         db_update_user(telefono, db_updates)
+        
+        # Log para debugging
+        print(f"✅ Análisis híbrido completado para {telefono}")
+        print(f"   SVM Veredicto: {svm_verdict['is_scam']}")
+        print(f"   Riesgo SVM: {svm_verdict['risk_level']}")
+        
     else:
-        await send_whatsapp_message(telefono, 
-            f"Lo siento mucho, {nombre_usuario}, tuve un problema al intentar analizar tu mensaje. ¿Podrías intentarlo de nuevo un poco más tarde, por favor? 🙏")
+        # Fallback si falla DeepSeek, pero usamos el SVM como respaldo
+        fallback_msg = (
+            f"Tuve problemas con mi conexión a IA, pero mi sistema local de detección dice:\n\n"
+            f"⚠️ **Nivel de Riesgo: {svm_verdict['risk_level']}**\n"
+            f"{svm_verdict['main_reason']}\n\n"
+            f"Te recomendaría no hacer clic en enlace alguno de este mensaje."
+        )
+        await send_whatsapp_message(telefono, fallback_msg)
 
 async def handle_pregunta_seguridad(telefono: str, pregunta: str, user_profile: dict, nombre_usuario: str):
     """Maneja preguntas sobre ciberseguridad"""
