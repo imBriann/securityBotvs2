@@ -23,15 +23,20 @@ def set_http_client(client: httpx.AsyncClient):
 async def send_whatsapp_message(
     to: str, 
     text: str = None,               # Ahora es opcional si usas template
-    message_type: str = "text",     # "text" o "template"
+    message_type: str = "text",     # "text", "template", o "interactive"
     template_name: str = None,      # Nombre de la plantilla (ej. "tyc")
     template_language: str = "es_CO", 
     template_components: list = None, # Para pasar la imagen o variables
+    interactive_type: str = None,   # "button", "list" para mensajes interactivos
+    interactive_body: str = None,   # Cuerpo del mensaje interactivo
+    interactive_footer: str = None, # Pie del mensaje interactivo
+    interactive_buttons: list = None, # Botones [{"type": "reply", "reply": {"id": "x", "title": "text"}}]
+    interactive_action: dict = None, # Acción personalizada (list_items, etc.)
     access_token: str = None,
     phone_number_id: str = None
 ):
     """
-    Envía un mensaje (texto o plantilla) a través de WhatsApp Business API.
+    Envía un mensaje (texto, plantilla, o interactivo) a través de WhatsApp Business API.
     """
     global http_client
     
@@ -72,15 +77,51 @@ async def send_whatsapp_message(
             "language": {"code": template_language},
             "components": template_components or []
         }
+    
+    elif message_type == "interactive":
+        if not interactive_type:
+            print("Error: Se requiere interactive_type para mensajes interactivos.")
+            return
+        
+        interactive_payload = {
+            "type": interactive_type
+        }
+        
+        # Agregar body y footer si existen
+        if interactive_body or interactive_footer:
+            interactive_payload["body"] = {}
+            if interactive_body:
+                interactive_payload["body"]["text"] = interactive_body
+            if interactive_footer:
+                interactive_payload["footer"] = {"text": interactive_footer}
+        
+        # Agregar botones o acción
+        if interactive_type == "button" and interactive_buttons:
+            interactive_payload["action"] = {
+                "buttons": interactive_buttons
+            }
+        elif interactive_action:
+            interactive_payload["action"] = interactive_action
+        
+        payload["interactive"] = interactive_payload
 
     try:
+        print(f"📤 Payload para {to} (tipo={message_type}): {str(payload)[:200]}...")
         response = await http_client.post(url, json=payload, headers=headers)
         response.raise_for_status()
         # Log más limpio dependiendo del tipo
-        content_log = text[:30] if text else f"Template: {template_name}"
-        print(f"Mensaje enviado a {to}: [{content_log}] (Estado: {response.status_code})")
+        if message_type == "text":
+            content_log = text[:30] if text else "Vacío"
+        elif message_type == "template":
+            content_log = f"Template: {template_name}"
+        elif message_type == "interactive":
+            content_log = f"Interactive: {interactive_type}"
+        else:
+            content_log = f"Tipo: {message_type}"
+        print(f"✅ Mensaje enviado a {to}: [{content_log}] (Estado: {response.status_code})")
     except Exception as e:
-        print(f"Error enviando mensaje a {to}: {e}")
+        print(f"❌ Error enviando mensaje a {to}: {type(e).__name__}: {str(e)[:150]}")
+        print(f"   Payload que falló: {str(payload)[:300]}")
 
 
 async def analyze_with_deepseek(
