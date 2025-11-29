@@ -24,7 +24,8 @@ COPY requirements.txt .
 
 # Instala las dependencias de Python
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir --upgrade scikit-learn==1.7.2
 
 # Copia el resto de la aplicación
 COPY app/ ./app/

@@ -19,7 +19,7 @@ requests==2.31.0
 python-dotenv==1.0.0
 
 # Machine Learning (NUEVO)
-scikit-learn==1.3.2
+scikit-learn==1.7.2
 pandas==2.1.3
 joblib==1.3.2
 
