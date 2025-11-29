@@ -2,6 +2,7 @@ import asyncio
 import os
 import re
 import sqlite3
+import logging
 from app.services.external_apis import send_whatsapp_message, analyze_with_deepseek
 from app.services.admin_commands import handle_admin_command, is_admin, is_admin_command
 from app.services.svm_classifier import svm_classifier, initialize_svm
@@ -34,19 +35,40 @@ if not os.path.exists(IMAGES_DIR):
 # ===== FUNCIÓN AUXILIAR PARA PLANTILLAS DE FEEDBACK =====
 async def solicitar_feedback_template(telefono: str, nombre_usuario: str):
     """
-    Solicita feedback al usuario de forma simple y confiable.
-    Usa texto porque es lo más compatible sin requerir plantillas aprobadas.
+    Envía la plantilla de feedback aprobada por Meta.
+    ESTRUCTURA VALIDADA: Body + parameter_name='nombre'
     """
-    try:
-        print(f"📝 Enviando solicitud de feedback a {telefono}...")
-        await send_whatsapp_message(
-            to=telefono,
-            text=f"{nombre_usuario}, ¿te fue útil este análisis?\n\n👍 Escribe: útil\n👎 Escribe: no útil"
-        )
-        print(f"✅ Solicitud de feedback enviada")
-    except Exception as e:
-        print(f"⚠️  Error enviando feedback: {e}")
-# ===== FIN FUNCIÓN AUXILIAR =====
+    
+    # 1. Configuración exacta que funcionó en el diagnóstico
+    NOMBRE_PLANTILLA = "feedback_analisis"
+    CODIGO_IDIOMA = "es_CO" 
+    
+    # 2. Componentes (La combinación ganadora 🏆)
+    components = [
+        {
+            "type": "body",
+            "parameters": [
+                {
+                    "type": "text",
+                    # OJO: Esto es lo que Meta exigía para tu plantilla nueva
+                    "parameter_name": "nombre", 
+                    "text": str(nombre_usuario) if nombre_usuario else "Usuario"
+                }
+            ]
+        }
+    ]
+
+    # 3. Envío
+    # Nota: No usamos try/except aquí para que si falla, el error suba 
+    # y active el fallback en la función que lo llama.
+    await send_whatsapp_message(
+        to=telefono,
+        text="", # Parámetro correcto (no message_body) - requerido pero vacío para templates
+        message_type="template",
+        template_name=NOMBRE_PLANTILLA,
+        template_language=CODIGO_IDIOMA, 
+        template_components=components
+    )
 
 async def handle_user_message(telefono_remitente: str, message_object: dict, message_type: str, 
                                text_recibido_original: str, current_user: sqlite3.Row):
@@ -71,52 +93,60 @@ async def handle_user_message(telefono_remitente: str, message_object: dict, mes
             return
     # ===== FIN DE COMANDOS ADMINISTRATIVOS =====
     
-    # ===== MANEJO DE BOTONES INTERACTIVOS (FEEDBACK) =====
+    # ===== LÓGICA UNIFICADA PARA BOTONES (FEEDBACK) =====
+    # Unificamos: interactive (button_reply/list_reply) + button (template buttons)
+    btn_text = ""
+    
+    # Caso A: Botones Interactivos (button_reply, list_reply)
     if message_type == "interactive":
         interactive_type = message_object.get("interactive", {}).get("type")
         
         if interactive_type == "button_reply":
-            # Obtener el ID y el Texto del botón presionado
+            # Estructura: interactive.button_reply.title
+            btn_text = message_object.get("interactive", {}).get("button_reply", {}).get("title", "")
             btn_id = message_object.get("interactive", {}).get("button_reply", {}).get("id", "")
-            btn_title = message_object.get("interactive", {}).get("button_reply", {}).get("title", "")
-            
-            print(f"🔘 Botón presionado por {telefono_remitente}: {btn_title} (ID: {btn_id})")
-            
-            # Normalizar para comparar - ahora soporta IDs y títulos
-            title_lower = btn_title.lower() if btn_title else ""
-            id_lower = btn_id.lower() if btn_id else ""
-            
-            # Determinar tipo de feedback
-            is_positive = ("útil" in title_lower or "correcto" in title_lower or "👍" in title_lower or 
-                          "ok" in id_lower or "util_ok" in id_lower or "positiv" in id_lower)
-            
-            is_negative = ("incorrecto" in title_lower or "falló" in title_lower or "👎" in title_lower or 
-                          "no util" in title_lower or "no_util" in id_lower or "util_no" in id_lower or 
-                          "negativ" in id_lower)
-            
-            if is_positive or is_negative:
-                feedback_tipo = "POSITIVO" if is_positive else "NEGATIVO"
-                print(f"📊 Registrando feedback {feedback_tipo} para {telefono_remitente}")
-                
-                updated = update_user_feedback(telefono_remitente, feedback_tipo)
-                
-                if updated:
-                    if feedback_tipo == "POSITIVO":
-                        await send_whatsapp_message(telefono_remitente, 
-                            "¡Gracias por tu feedback! 🧠✅ Me alegra haber ayudado. Tu opinión me ayuda a mejorar.")
-                    else:
-                        await send_whatsapp_message(telefono_remitente, 
-                            "Entendido. 🧠⚠️ Un humano revisará este caso para mejorar mi entrenamiento. Gracias por ayudarme a crecer.")
-                else:
-                    print(f"⚠️ No se pudo actualizar feedback para {telefono_remitente}")
-                    await send_whatsapp_message(telefono_remitente, 
-                        "Recibí tu respuesta, pero hubo un error al guardar tu feedback. Intenta de nuevo.")
-                return
-            else:
-                # Botón presionado pero no es feedback
-                print(f"⚠️ Botón interactivo recibido pero no es feedback: {btn_title} ({btn_id})")
-                # No hacer return, continuar con el flujo normal
-    # ===== FIN MANEJO BOTONES =====
+            logging.info(f"🔘 Button Reply detectado: '{btn_text}' (ID: {btn_id})")
+            print(f"🔘 Button Reply por {telefono_remitente}: {btn_text} (ID: {btn_id})")
+        
+        elif interactive_type == "list_reply":
+            # Estructura: interactive.list_reply.title
+            btn_text = message_object.get("interactive", {}).get("list_reply", {}).get("title", "")
+            logging.info(f"🔘 List Reply detectado: '{btn_text}'")
+            print(f"🔘 List Reply por {telefono_remitente}: {btn_text}")
+    
+    # Caso B: Botones de Plantilla (Template Buttons)
+    elif message_type == "button":
+        # Estructura: button.text
+        btn_text = message_object.get("button", {}).get("text", "")
+        logging.info(f"🔘 Template Button detectado: '{btn_text}'")
+        print(f"🔘 Template Button por {telefono_remitente}: {btn_text}")
+    
+    # Procesamos cualquier botón detectado
+    if btn_text:
+        btn_text_norm = btn_text.lower()
+        
+        # Palabras clave negativas (PRIMERO - más específicas)
+        if any(x in btn_text_norm for x in ["no", "malo", "error", "equivoc", "fallo", "incorrecto", "👎"]):
+            print(f"❌ Feedback NEGATIVO detectado: '{btn_text}'")
+            updated = update_user_feedback(telefono_remitente, "NEGATIVO")
+            if updated:
+                await send_whatsapp_message(telefono_remitente, 
+                    "Entendido 😓. He marcado este análisis para revisión humana. Gracias por corregirme.")
+            return
+        
+        # Palabras clave positivas (DESPUÉS)
+        elif any(x in btn_text_norm for x in ["útil", "util", "bueno", "excelente", "correcto", "si", "sí", "👍"]):
+            print(f"✅ Feedback POSITIVO detectado: '{btn_text}'")
+            updated = update_user_feedback(telefono_remitente, "POSITIVO")
+            if updated:
+                await send_whatsapp_message(telefono_remitente, 
+                    "¡Genial! 🥳 Me alegra haber ayudado. Guardaré este caso como un éxito.")
+            return
+        
+        else:
+            print(f"⚠️ Botón detectado pero no es feedback: '{btn_text}'")
+
+    # ===== FIN LÓGICA UNIFICADA BOTONES =====
     
     # Detectar comandos de reset
     normalized_text = normalize_text(text_recibido_original)
@@ -126,9 +156,6 @@ async def handle_user_message(telefono_remitente: str, message_object: dict, mes
     if is_reset_command:
         await handle_reset_command(telefono_remitente, user_name)
         return
-    
-    # Nota: El feedback POSITIVO/NEGATIVO ahora se captura SOLO vía botones interactivos
-    # Los emojis de texto (👍, 👎) como entrada ya no se procesan - se usan botones en lugar
     
     # ===== INTERCEPTOR ESPECIAL PARA MODO REVISIÓN DE ADMINISTRADOR =====
     if user_state == ESTADO_ADMIN_REVISANDO:
@@ -491,19 +518,13 @@ async def handle_analizar_mensaje(telefono: str, mensaje: str, user_data: sqlite
         # Pequeña pausa para mejor UX
         await asyncio.sleep(0.5)
         
-        # ========== PASO 5: ENVIAR PLANTILLA DE FEEDBACK ==========
-        # En lugar de pregunta de texto, enviamos plantilla con botones interactivos
-        await solicitar_feedback_template(telefono, nombre_usuario)
-        
-        # Pequeña pausa
-        await asyncio.sleep(0.5)
-        
-        # ========== PASO 6: INVITAR A VER DETALLES ==========
+        # ========== PASO 5: INVITAR A VER DETALLES ==========
+        # NO PEDIR FEEDBACK AQUÍ - Se pide después en handle_estado_esperando_detalles
         await send_whatsapp_message(telefono, 
-            f"📋 {nombre_usuario}, tengo un informe técnico detallado explicando por qué llegamos a esta conclusión.\n\n"
+            f"📋 Tengo un informe técnico detallado explicando por qué llegamos a esta conclusión.\n\n"
             "¿Quieres ver el **análisis completo**? (Responde SÍ o NO)")
 
-        # ========== PASO 7: ACTUALIZAR ESTADO Y GUARDAR CONTEXTO ==========
+        # ========== PASO 6: ACTUALIZAR ESTADO Y GUARDAR CONTEXTO ==========
         db_updates = {
             "estado": ESTADO_ESPERANDO_MAS_DETALLES,
             "last_analysis_details": detalles_completos,
@@ -768,56 +789,62 @@ async def process_incoming_image_task(telefono: str, user_data: sqlite3.Row, ima
         await send_whatsapp_message(telefono, 
             f"⚠️ Lo siento mucho, {user_name}, ocurrió un error inesperado mientras procesaba tu imagen. Por favor, intenta más tarde. 🙏")
 async def handle_estado_esperando_detalles(telefono: str, text: str, user_data: sqlite3.Row, message_type: str):
-    """Maneja el estado cuando el usuario debe decidir si quiere ver detalles"""
+    """Maneja la respuesta de si quiere ver detalles o no.
+    
+    FLUJO CORRECTO:
+    - Si dice SÍ -> Mostrar detalles -> Esperar -> Pedir feedback
+    - Si dice NO -> Pedir feedback igual
+    """
     nombre_usuario = user_data["nombre"] if user_data and user_data["nombre"] else "tú"
+    
     if message_type != "text":
         await send_whatsapp_message(telefono, 
-            f"Hola {nombre_usuario}, esperaba un mensaje de texto para saber si querías más detalles. Si es así, por favor, escribe algo como 'sí, muéstrame'.")
+            f"Hola {nombre_usuario}, esperaba un mensaje de texto (SÍ o NO).")
         return
 
     print(f"DEBUG: {telefono} en ESPERANDO_MAS_DETALLES, recibió: '{text}'")
 
+    # Evaluar si el usuario quiere detalles
     user_profile_dict = dict(user_data)
     decision_ia = await analyze_with_deepseek(normalize_text(text), "decision_ver_detalles", user_profile_dict)
     print(f"DEBUG: Decisión de IA para ver detalles ({telefono}): {decision_ia}")
 
+    # ===== CASO 1: El usuario QUIERE ver detalles =====
     if decision_ia == "QUIERE_DETALLES":
+        # Enviar detalles
         detalles = user_data["last_analysis_details"]
         if detalles:
             await send_whatsapp_message(telefono, detalles)
-            # Feedback ahora se maneja SOLO con la plantilla de template en handle_analizar_mensaje
-            # NO enviar aquí para evitar duplicados
-            
-            new_state = ESTADO_REGISTRADO
-            analisis_lower = detalles.lower()
-            
-            if ("¿llegaste a hacer clic" in analisis_lower and 
-                ("sí o no" in analisis_lower or "si o no" in analisis_lower) and 
-                "escribe ayuda" in analisis_lower):
-                new_state = ESTADO_ESPERANDO_RESPUESTA_PHISHING
-                print(f"INFO: Usuario {telefono} movido a ESPERANDO_RESPUESTA_PHISHING después de ver detalles.")
-            
-            db_update_user(telefono, {"estado": new_state, "last_analysis_details": None})
         else:
-            await send_whatsapp_message(telefono, 
-                "Parece que no tengo los detalles guardados. Por favor, envía el mensaje original de nuevo para analizarlo.")
-            db_update_user(telefono, {"estado": ESTADO_REGISTRADO, "last_analysis_details": None})
-
-    elif decision_ia == "OTRA_COSA":
-        print(f"DEBUG: {telefono} dijo OTRA_COSA. Tratando como nueva consulta.")
-        db_update_user(telefono, {"estado": ESTADO_REGISTRADO, "last_analysis_details": None})
-        current_user_reloaded = db_get_user(telefono)
+            await send_whatsapp_message(telefono, "⚠️ No pude recuperar los detalles, pero el veredicto anterior se mantiene.")
         
-        if current_user_reloaded:
-            await handle_text_message(telefono, text, current_user_reloaded)
-        else:
-            print(f"ERROR: No se pudo recargar el usuario {telefono} después de OTRA_COSA.")
+        # Esperar a que el usuario lea
+        await asyncio.sleep(3)
+        
+        # AHORA SÍ: Pedir Feedback (después de los detalles)
+        try:
+            await solicitar_feedback_template(telefono, nombre_usuario)
+        except Exception as e:
+            print(f"⚠️ Error: {e}")
             await send_whatsapp_message(telefono, 
-                "Hubo un pequeño problema, ¿podrías enviar tu consulta de nuevo, por favor?")
+                "¿Te fue útil este análisis? (Responde 'útil' o 'no útil')")
+
+    # ===== CASO 2: El usuario NO quiere detalles o responde cualquier otra cosa =====
     else:
-        print(f"WARN: Respuesta no esperada de IA para decision_ver_detalles ({telefono}): {decision_ia}")
-        await send_whatsapp_message(telefono, 
-            f"🤔 {nombre_usuario}, no estoy seguro de cómo proceder. Si querías ver los detalles, puedes intentarlo de nuevo diciendo 'sí, quiero verlos'.")
+        # Confirmación al usuario
+        await send_whatsapp_message(telefono, "Entendido, mantenemos el chat breve.")
+        
+        # Igual pedimos feedback porque ya le dimos el veredicto corto
+        await asyncio.sleep(1)
+        try:
+            await solicitar_feedback_template(telefono, nombre_usuario)
+        except Exception as e:
+            print(f"⚠️ Error: {e}")
+            await send_whatsapp_message(telefono, 
+                "¿Te fue útil mi análisis rápido? (Responde 'útil' o 'no útil')")
+
+    # En cualquier caso, volver al estado normal
+    db_update_user(telefono, {"estado": ESTADO_REGISTRADO, "last_analysis_details": None})
 async def handle_post_phishing_response(telefono: str, text: str, user_data: sqlite3.Row, message_type: str):
     """Maneja la respuesta del usuario después de un análisis de phishing"""
     nombre_usuario = user_data["nombre"] if user_data and user_data["nombre"] else "tú"

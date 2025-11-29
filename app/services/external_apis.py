@@ -23,20 +23,25 @@ def set_http_client(client: httpx.AsyncClient):
 async def send_whatsapp_message(
     to: str, 
     text: str = None,               # Ahora es opcional si usas template
-    message_type: str = "text",     # "text", "template", o "interactive"
-    template_name: str = None,      # Nombre de la plantilla (ej. "tyc")
+    message_type: str = "text",     # "text" o "template"
+    template_name: str = None,      # Nombre de la plantilla (ej. "feedback_analisis")
     template_language: str = "es_CO", 
-    template_components: list = None, # Para pasar la imagen o variables
-    interactive_type: str = None,   # "button", "list" para mensajes interactivos
-    interactive_body: str = None,   # Cuerpo del mensaje interactivo
-    interactive_footer: str = None, # Pie del mensaje interactivo
-    interactive_buttons: list = None, # Botones [{"type": "reply", "reply": {"id": "x", "title": "text"}}]
-    interactive_action: dict = None, # Acción personalizada (list_items, etc.)
+    template_components: list = None, # Para pasar variables a la plantilla
     access_token: str = None,
     phone_number_id: str = None
 ):
     """
-    Envía un mensaje (texto, plantilla, o interactivo) a través de WhatsApp Business API.
+    Envía un mensaje (texto o plantilla) a través de WhatsApp Business API.
+    
+    Args:
+        to: Número de teléfono del destinatario
+        text: Contenido del mensaje (para type="text")
+        message_type: "text" o "template"
+        template_name: Nombre de la plantilla (para type="template")
+        template_language: Código de idioma (ej. "es_CO")
+        template_components: Componentes/parámetros de la plantilla
+        access_token: Token de acceso (opcional, usa APIConfig si no se proporciona)
+        phone_number_id: ID del número (opcional, usa APIConfig si no se proporciona)
     """
     global http_client
     
@@ -55,19 +60,21 @@ async def send_whatsapp_message(
         "Content-Type": "application/json"
     }
 
-    # Construcción del Payload según el tipo
+    # Estructura base del payload
     payload = {
         "messaging_product": "whatsapp",
         "to": to,
         "type": message_type
     }
 
+    # CASO 1: Mensaje de Texto Normal
     if message_type == "text":
         if not text:
             print("Error: Se intentó enviar mensaje de texto sin contenido.")
             return
         payload["text"] = {"body": text}
         
+    # CASO 2: Plantilla (Template)
     elif message_type == "template":
         if not template_name:
             print("Error: Se requiere template_name para mensajes de plantilla.")
@@ -77,51 +84,36 @@ async def send_whatsapp_message(
             "language": {"code": template_language},
             "components": template_components or []
         }
-    
-    elif message_type == "interactive":
-        if not interactive_type:
-            print("Error: Se requiere interactive_type para mensajes interactivos.")
-            return
-        
-        interactive_payload = {
-            "type": interactive_type
-        }
-        
-        # Agregar body y footer si existen
-        if interactive_body or interactive_footer:
-            interactive_payload["body"] = {}
-            if interactive_body:
-                interactive_payload["body"]["text"] = interactive_body
-            if interactive_footer:
-                interactive_payload["footer"] = {"text": interactive_footer}
-        
-        # Agregar botones o acción
-        if interactive_type == "button" and interactive_buttons:
-            interactive_payload["action"] = {
-                "buttons": interactive_buttons
-            }
-        elif interactive_action:
-            interactive_payload["action"] = interactive_action
-        
-        payload["interactive"] = interactive_payload
 
     try:
         print(f"📤 Payload para {to} (tipo={message_type}): {str(payload)[:200]}...")
         response = await http_client.post(url, json=payload, headers=headers)
         response.raise_for_status()
-        # Log más limpio dependiendo del tipo
+        
+        # Log según el tipo
         if message_type == "text":
             content_log = text[:30] if text else "Vacío"
         elif message_type == "template":
             content_log = f"Template: {template_name}"
-        elif message_type == "interactive":
-            content_log = f"Interactive: {interactive_type}"
         else:
             content_log = f"Tipo: {message_type}"
+            
         print(f"✅ Mensaje enviado a {to}: [{content_log}] (Estado: {response.status_code})")
     except Exception as e:
-        print(f"❌ Error enviando mensaje a {to}: {type(e).__name__}: {str(e)[:150]}")
-        print(f"   Payload que falló: {str(payload)[:300]}")
+        # Extraer detalles del error de Meta (si disponible)
+        error_detail = "Error desconocido"
+        try:
+            if hasattr(e, 'response') and e.response is not None:
+                error_data = e.response.json()
+                error_detail = f"Meta error: {error_data}"
+        except:
+            error_detail = str(e)
+        
+        print(f"❌ Error enviando mensaje a {to}: {type(e).__name__}")
+        print(f"🔍 DETALLE DEL ERROR: {error_detail}")
+        print(f"   Payload que falló: {str(payload)[:400]}")
+        raise e  # Re-lanzar para que conversation_flow sepa que falló
+
 
 
 async def analyze_with_deepseek(
