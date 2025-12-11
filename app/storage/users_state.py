@@ -1,9 +1,13 @@
-import sqlite3
-
-from app.utils.config import DB_NAME
+"""
+Módulo de gestión de usuarios con PostgreSQL.
+"""
+import psycopg2
+from psycopg2.extras import RealDictCursor
+from contextlib import contextmanager
+from typing import Optional, Dict
+from app.utils.config import DatabaseConfig
 
 # --- Constantes de estado de usuario ---
-
 ESTADO_PENDIENTE_TERMINOS = 0
 ESTADO_PENDIENTE_NOMBRE = 1
 ESTADO_PENDIENTE_EDAD = 2
@@ -13,139 +17,266 @@ ESTADO_ESPERANDO_RESPUESTA_PHISHING = 5
 ESTADO_ESPERANDO_MAS_DETALLES = 6
 
 
-# --- Funciones de Base de Datos ---
-
+@contextmanager
 def get_db_connection():
-    conn = sqlite3.connect(DB_NAME, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
+    """
+    Context manager para conexiones a PostgreSQL.
+    Maneja automáticamente el cierre de la conexión.
+    """
+    conn = None
+    try:
+        conn = psycopg2.connect(
+            **DatabaseConfig.get_connection_params(),
+            cursor_factory=RealDictCursor
+        )
+        yield conn
+    except psycopg2.Error as e:
+        print(f"❌ Error de conexión a PostgreSQL: {e}")
+        if conn:
+            conn.rollback()
+        raise
+    finally:
+        if conn:
+            conn.close()
 
 
 def setup_database():
-    conn_setup = get_db_connection()
-    cursor_setup = conn_setup.cursor()
+    """
+    Crea las tablas necesarias en PostgreSQL si no existen.
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # Tabla de usuarios
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS usuarios (
+                        telefono VARCHAR(20) PRIMARY KEY,
+                        nombre VARCHAR(100),
+                        edad INTEGER,
+                        conocimiento VARCHAR(20),
+                        acepto_terminos INTEGER DEFAULT 0,
+                        estado INTEGER DEFAULT 0,
+                        mensajes_enviados INTEGER DEFAULT 0,
+                        last_analysis_details TEXT,
+                        last_image_ocr_text TEXT,
+                        last_image_analysis_raw TEXT,
+                        last_image_id_processed VARCHAR(100),
+                        last_image_timestamp TIMESTAMP,
+                        last_analyzed_url TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                
+                # Tabla de imágenes procesadas
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS imagenes_procesadas (
+                        id SERIAL PRIMARY KEY,
+                        telefono_usuario VARCHAR(20),
+                        nombre_archivo_imagen VARCHAR(255),
+                        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (telefono_usuario) REFERENCES usuarios(telefono) ON DELETE CASCADE
+                    )
+                """)
+                
+                # Índices para mejorar rendimiento
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_usuarios_estado 
+                    ON usuarios(estado)
+                """)
+                
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_imagenes_telefono 
+                    ON imagenes_procesadas(telefono_usuario)
+                """)
+                
+                conn.commit()
+                print("✅ Tablas de PostgreSQL creadas/verificadas exitosamente")
+                
+    except Exception as e:
+        print(f"❌ Error al configurar base de datos PostgreSQL: {e}")
+        raise
 
-    cursor_setup.execute(
-        """
-        CREATE TABLE IF NOT EXISTS usuarios (
-            telefono TEXT PRIMARY KEY,
-            nombre TEXT,
-            edad INTEGER,
-            conocimiento TEXT,
-            acepto_terminos INTEGER DEFAULT 0,
-            estado INTEGER DEFAULT 0,
-            mensajes_enviados INTEGER DEFAULT 0,
-            last_analysis_details TEXT,
-            last_image_ocr_text TEXT,
-            last_image_analysis_raw TEXT,
-            last_image_id_processed TEXT,
-            last_image_timestamp DATETIME,
-            last_analyzed_url TEXT
-        );
-        """
-    )
 
-    cursor_setup.execute(
-        """
-        CREATE TABLE IF NOT EXISTS imagenes_procesadas (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            telefono_usuario TEXT,
-            nombre_archivo_imagen TEXT,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (telefono_usuario) REFERENCES usuarios(telefono)
-        );
-        """
-    )
-
-    conn_setup.commit()
-    conn_setup.close()
-
-
-def db_get_user(telefono: str) -> sqlite3.Row | None:
-    conn_db = get_db_connection()
-    cursor_db = conn_db.cursor()
-    cursor_db.execute("SELECT * FROM usuarios WHERE telefono = ?", (telefono,))
-    user = cursor_db.fetchone()
-    conn_db.close()
-    return user
+def db_get_user(telefono: str) -> Optional[Dict]:
+    """
+    Obtiene un usuario de la base de datos.
+    
+    Args:
+        telefono: Número de teléfono del usuario
+        
+    Returns:
+        Dict con datos del usuario o None si no existe
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT * FROM usuarios WHERE telefono = %s",
+                    (telefono,)
+                )
+                user = cursor.fetchone()
+                return dict(user) if user else None
+                
+    except Exception as e:
+        print(f"❌ Error al obtener usuario {telefono}: {e}")
+        return None
 
 
 def db_create_user(telefono: str):
-    conn_db = get_db_connection()
-    cursor_db = conn_db.cursor()
+    """
+    Crea un nuevo usuario en la base de datos.
+    
+    Args:
+        telefono: Número de teléfono del usuario
+    """
     try:
-        cursor_db.execute(
-            "INSERT INTO usuarios (telefono, acepto_terminos, estado) "
-            "VALUES (?, ?, ?)",
-            (telefono, 0, ESTADO_PENDIENTE_TERMINOS),
-        )
-        conn_db.commit()
-    except sqlite3.IntegrityError:
-        print(f"Intento de crear usuario duplicado: {telefono}")
-    finally:
-        conn_db.close()
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    INSERT INTO usuarios (telefono, acepto_terminos, estado)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (telefono) DO NOTHING
+                """, (telefono, 0, ESTADO_PENDIENTE_TERMINOS))
+                conn.commit()
+                print(f"✅ Usuario {telefono} creado exitosamente")
+                
+    except Exception as e:
+        print(f"❌ Error al crear usuario {telefono}: {e}")
+        raise
 
 
-def db_update_user(telefono: str, data: dict):
+def db_update_user(telefono: str, data: Dict):
+    """
+    Actualiza los datos de un usuario.
+    
+    Args:
+        telefono: Número de teléfono del usuario
+        data: Diccionario con los campos a actualizar
+    """
     if not data:
-        print(f"DEBUG: db_update_user llamado para {telefono} sin datos. Retornando.")
+        print(f"⚠️ db_update_user llamado para {telefono} sin datos")
         return
-
-    fields = ", ".join([f"{key} = ?" for key in data])
-    values = list(data.values())
-    values.append(telefono)
-
-    conn_db = None
-    query = f"UPDATE usuarios SET {fields} WHERE telefono = ?"
-
+    
     try:
-        conn_db = get_db_connection()
-        cursor_db = conn_db.cursor()
-        print(
-            f"DEBUG: Ejecutando SQL: {query} con valores "
-            f"(excepto el último que es el teléfono): {tuple(values[:-1])} "
-            f"para tel: {telefono}"
-        )
-        cursor_db.execute(query, tuple(values))
-        conn_db.commit()
-        print(f"DEBUG: Commit exitoso para {telefono} en db_update_user.")
-    except sqlite3.Error as e_sqlite:
-        print(
-            "ERROR SQLITE en db_update_user para "
-            f"{telefono}: {e_sqlite}. Query: {query}, "
-            f"Values (sin token): "
-            f"{[(v[:20] + '...' if isinstance(v, str) and len(v) > 50 else v) for v in tuple(values)]}"
-        )
-        if conn_db:
-            conn_db.rollback()
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # Construir query dinámicamente
+                fields = ", ".join([f"{key} = %s" for key in data.keys()])
+                fields += ", updated_at = CURRENT_TIMESTAMP"
+                values = list(data.values())
+                values.append(telefono)
+                
+                query = f"UPDATE usuarios SET {fields} WHERE telefono = %s"
+                
+                print(f"🔄 Actualizando usuario {telefono}: {list(data.keys())}")
+                cursor.execute(query, tuple(values))
+                conn.commit()
+                print(f"✅ Usuario {telefono} actualizado exitosamente")
+                
+    except Exception as e:
+        print(f"❌ Error al actualizar usuario {telefono}: {e}")
+        print(f"   Campos: {list(data.keys())}")
         raise
-    except Exception as e_general:
-        print(
-            "ERROR GENERAL en db_update_user para "
-            f"{telefono}: {e_general}. Query: {query}, "
-            f"Values (sin token): "
-            f"{[(v[:20] + '...' if isinstance(v, str) and len(v) > 50 else v) for v in tuple(values)]}"
-        )
-        if conn_db:
-            conn_db.rollback()
-        raise
-    finally:
-        if conn_db:
-            conn_db.close()
-            print(f"DEBUG: Conexión DB cerrada para {telefono} en db_update_user.")
 
 
 def db_save_image_record(telefono_usuario: str, nombre_archivo_imagen: str):
-    conn_db = get_db_connection()
-    cursor_db = conn_db.cursor()
-    cursor_db.execute(
-        "INSERT INTO imagenes_procesadas (telefono_usuario, nombre_archivo_imagen) "
-        "VALUES (?, ?)",
-        (telefono_usuario, nombre_archivo_imagen),
-    )
-    conn_db.commit()
-    conn_db.close()
+    """
+    Guarda un registro de imagen procesada.
+    
+    Args:
+        telefono_usuario: Número de teléfono del usuario
+        nombre_archivo_imagen: Nombre del archivo de imagen
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    INSERT INTO imagenes_procesadas (telefono_usuario, nombre_archivo_imagen)
+                    VALUES (%s, %s)
+                """, (telefono_usuario, nombre_archivo_imagen))
+                conn.commit()
+                print(f"✅ Registro de imagen guardado para {telefono_usuario}")
+                
+    except Exception as e:
+        print(f"❌ Error al guardar registro de imagen: {e}")
+        raise
+
+
+def db_delete_user(telefono: str) -> bool:
+    """
+    Elimina un usuario y sus datos relacionados.
+    
+    Args:
+        telefono: Número de teléfono del usuario
+        
+    Returns:
+        True si se eliminó exitosamente
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # PostgreSQL CASCADE eliminará automáticamente las imágenes relacionadas
+                cursor.execute("DELETE FROM usuarios WHERE telefono = %s", (telefono,))
+                conn.commit()
+                print(f"✅ Usuario {telefono} eliminado exitosamente")
+                return True
+                
+    except Exception as e:
+        print(f"❌ Error al eliminar usuario {telefono}: {e}")
+        return False
+
+
+def db_get_user_count() -> int:
+    """
+    Obtiene el número total de usuarios.
+    
+    Returns:
+        Número de usuarios registrados
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT COUNT(*) as count FROM usuarios")
+                result = cursor.fetchone()
+                return result['count'] if result else 0
+                
+    except Exception as e:
+        print(f"❌ Error al contar usuarios: {e}")
+        return 0
+
+
+def db_get_users_by_state(estado: int, limit: int = 10) -> list:
+    """
+    Obtiene usuarios por estado.
+    
+    Args:
+        estado: Estado a filtrar
+        limit: Número máximo de usuarios
+        
+    Returns:
+        Lista de usuarios
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT * FROM usuarios 
+                    WHERE estado = %s 
+                    ORDER BY updated_at DESC 
+                    LIMIT %s
+                """, (estado, limit))
+                users = cursor.fetchall()
+                return [dict(user) for user in users] if users else []
+                
+    except Exception as e:
+        print(f"❌ Error al obtener usuarios por estado: {e}")
+        return []
 
 
 # Inicializar la BD al importar el módulo
-setup_database()
+try:
+    setup_database()
+except Exception as e:
+    print(f"⚠️ No se pudo inicializar la base de datos: {e}")
+    print("   Asegúrate de que PostgreSQL esté corriendo y las credenciales sean correctas")

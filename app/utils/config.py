@@ -46,6 +46,79 @@ class APIConfig:
         return True
 
 
+class DatabaseConfig:
+    """Configuración de base de datos PostgreSQL."""
+    
+    # Opción 1: URL completa (recomendado para Render)
+    DATABASE_URL = os.getenv("DATABASE_URL")
+    
+    # Opción 2: Variables separadas (fallback)
+    POSTGRES_HOST = os.getenv("POSTGRES_HOST")
+    POSTGRES_PORT = os.getenv("POSTGRES_PORT")
+    POSTGRES_DB = os.getenv("POSTGRES_DB")
+    POSTGRES_USER = os.getenv("POSTGRES_USER")
+    POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
+    
+    @classmethod
+    def get_connection_string(cls) -> str:
+        """
+        Obtiene la cadena de conexión de PostgreSQL.
+        
+        Returns:
+            String de conexión en formato PostgreSQL
+        """
+        if cls.DATABASE_URL:
+            return cls.DATABASE_URL
+        
+        # Construir desde variables individuales
+        return (
+            f"postgresql://{cls.POSTGRES_USER}:{cls.POSTGRES_PASSWORD}@"
+            f"{cls.POSTGRES_HOST}:{cls.POSTGRES_PORT}/{cls.POSTGRES_DB}"
+        )
+    
+    @classmethod
+    def get_connection_params(cls) -> dict:
+        """
+        Obtiene parámetros de conexión como diccionario.
+        
+        Returns:
+            Dict con parámetros de conexión
+        """
+        if cls.DATABASE_URL:
+            # Parsear DATABASE_URL
+            import re
+            pattern = r'postgresql://([^:]+):([^@]+)@([^:]+):(\d+)/(.+)'
+            match = re.match(pattern, cls.DATABASE_URL)
+            
+            if match:
+                user, password, host, port, dbname = match.groups()
+                return {
+                    'host': host,
+                    'port': int(port),
+                    'database': dbname,
+                    'user': user,
+                    'password': password
+                }
+        
+        # Usar variables individuales
+        return {
+            'host': cls.POSTGRES_HOST,
+            'port': int(cls.POSTGRES_PORT),
+            'database': cls.POSTGRES_DB,
+            'user': cls.POSTGRES_USER,
+            'password': cls.POSTGRES_PASSWORD
+        }
+    
+    @classmethod
+    def validate(cls) -> bool:
+        """Valida que la configuración de BD esté completa."""
+        if cls.DATABASE_URL:
+            return True
+        
+        required = [cls.POSTGRES_HOST, cls.POSTGRES_DB, cls.POSTGRES_USER]
+        return all(required)
+
+
 class TesseractConfig:
     """Configuración de Tesseract OCR."""
     
@@ -188,6 +261,10 @@ if not APIConfig.validate():
     print("⚠️ Algunas variables de entorno críticas no están configuradas.")
     print("   El bot podría no funcionar correctamente.")
 
+if not DatabaseConfig.validate():
+    print("⚠️ Configuración de base de datos incompleta.")
+    print("   El bot podría no funcionar correctamente.")
+
 # Validar Tesseract
 if not TesseractConfig.validate_installation():
     print("⚠️ Tesseract OCR no está disponible.")
@@ -195,9 +272,6 @@ if not TesseractConfig.validate_installation():
 
 # Asegurar directorio de imágenes
 OCRConfig.ensure_images_dir()
-
-# Configuración de Base de Datos
-DB_NAME = "usuarios_bot.db"
 
 # Alias para Tips de Seguridad (para compatibilidad con conversation_flow.py)
 SECURITY_TIPS = SecurityTips.TIPS
@@ -211,3 +285,6 @@ ESTADO_REGISTRADO = 4
 ESTADO_ESPERANDO_RESPUESTA_PHISHING = 5
 ESTADO_ESPERANDO_MAS_DETALLES = 6
 ESTADO_ADMIN_REVISANDO = 99  # Estado especial para admin en modo revisión
+
+# NOTA: DB_NAME ya no se usa con PostgreSQL, pero se mantiene para compatibilidad
+DB_NAME = None  # PostgreSQL no usa archivo de BD
