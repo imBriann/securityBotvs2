@@ -6,10 +6,11 @@ Características de seguridad:
 - NO se entrena con dislikes automáticamente (evita data poisoning)
 - Solo acepta feedback positivo o dislikes revisados manualmente por admin
 - Genera reportes de cambios antes de aplicar
+
+PostgreSQL Version
 """
 
 import pickle
-import sqlite3
 from datetime import datetime
 from typing import Dict, List, Tuple
 from app.services.svm_classifier import svm_classifier
@@ -18,7 +19,6 @@ from app.storage.feedback_db import (
     get_unreviewed_negatives,
     get_feedback_stats
 )
-from app.utils.config import DB_NAME
 
 
 def analyze_feedback_quality() -> Dict:

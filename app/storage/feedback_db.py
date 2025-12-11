@@ -107,7 +107,14 @@ def log_interaction(
             f"{u.get('domain', 'N/A')}:{u.get('risk_level', 'DESCONOCIDO')}" 
             for u in url_analysis
         ]) if url_analysis else None
-        
+
+        # Asegurar que la confianza sea un float normal (no np.float64)
+        raw_conf = svm_res.get('confidence', 0.0)
+        try:
+            svm_confidence = float(raw_conf)
+        except (TypeError, ValueError):
+            svm_confidence = 0.0
+
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute("""
@@ -121,7 +128,7 @@ def log_interaction(
                     msg[:500],  # Limitar a 500 caracteres
                     len(msg),
                     "phishing" if svm_res.get('is_phishing_svm') else "legitimo",
-                    svm_res.get('confidence', 0.0),
+                    svm_confidence,
                     has_urls,
                     url_risk_levels,
                     deepseek_res[:1000] if deepseek_res else None,
@@ -129,7 +136,18 @@ def log_interaction(
                     1 if final_verdict.get('is_scam') else 0
                 ))
                 
-                log_id = cursor.fetchone()['id']
+                row = cursor.fetchone()
+                print("DEBUG row:", row, type(row))
+
+                if not row:
+                    raise RuntimeError("INSERT en analisis_logs no devolvió ningún id")
+
+                # Soportar cursor tipo dict (RealDictCursor) o tupla normal
+                if isinstance(row, dict):
+                    log_id = row["id"]
+                else:
+                    log_id = row[0]
+
                 conn.commit()
                 
                 print(f"📝 Log creado (ID: {log_id}) para {phone}")

@@ -2,7 +2,7 @@
 Módulo de configuración centralizada.
 Maneja todas las variables de entorno, constantes y configuraciones del sistema.
 """
-
+#reset
 import os
 from dotenv import load_dotenv
 
@@ -58,7 +58,7 @@ class DatabaseConfig:
     POSTGRES_DB = os.getenv("POSTGRES_DB")
     POSTGRES_USER = os.getenv("POSTGRES_USER")
     POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
-    
+
     @classmethod
     def get_connection_string(cls) -> str:
         """

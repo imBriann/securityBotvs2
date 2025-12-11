@@ -1,8 +1,8 @@
 import asyncio
 import os
 import re
-import sqlite3
 import logging
+from typing import Dict, Optional
 from app.services.external_apis import send_whatsapp_message, analyze_with_deepseek
 from app.services.admin_commands import handle_admin_command, is_admin, is_admin_command
 from app.services.svm_classifier import svm_classifier, initialize_svm
@@ -71,7 +71,7 @@ async def solicitar_feedback_template(telefono: str, nombre_usuario: str):
     )
 
 async def handle_user_message(telefono_remitente: str, message_object: dict, message_type: str, 
-                               text_recibido_original: str, current_user: sqlite3.Row):
+                               text_recibido_original: str, current_user: Dict):
     """Punto de entrada principal para manejar mensajes del usuario"""
     
     user_state = current_user["estado"]
@@ -196,7 +196,7 @@ async def handle_reset_command(telefono: str, user_name: str):
         "last_analyzed_url": None
     })
 
-async def handle_onboarding_process(telefono: str, text_received: str, user_data: sqlite3.Row, message_type: str):
+async def handle_onboarding_process(telefono: str, text_received: str, user_data: Dict, message_type: str):
     """Maneja el proceso de registro del usuario"""
     # AHORA PERMITIMOS TEXTO, BOTONES Y MENSAJES INTERACTIVOS:
     if message_type not in ["text", "button", "interactive"]:
@@ -338,7 +338,7 @@ async def handle_conocimiento_input(telefono: str, text_received: str, user_name
         )
 
 async def handle_registered_user_message(telefono: str, message_object: dict, message_type: str, 
-                                        text_recibido: str, user_data: sqlite3.Row):
+                                        text_recibido: str, user_data: Dict):
     """Maneja mensajes de usuarios ya registrados"""
     user_name = user_data["nombre"] if user_data and user_data["nombre"] else "tú"
     
@@ -361,7 +361,7 @@ async def handle_registered_user_message(telefono: str, message_object: dict, me
         await send_whatsapp_message(telefono, 
             f"Recibí un tipo de mensaje ({message_type}) que aún no sé cómo procesar del todo, {user_name}. Por ahora, mi especialidad son los mensajes de texto e imágenes. 📄🖼️")
 
-async def handle_text_message(telefono: str, text: str, user_data: sqlite3.Row):
+async def handle_text_message(telefono: str, text: str, user_data: Dict):
     """Maneja mensajes de texto para usuarios registrados"""
     cleaned_text = re.sub(r'\s+', ' ', text).strip()
     nombre_usuario = user_data["nombre"] if user_data and user_data["nombre"] else "tú"
@@ -415,7 +415,7 @@ async def handle_text_message(telefono: str, text: str, user_data: sqlite3.Row):
     else:
         await handle_intencion_desconocida(telefono, nombre_usuario, intencion, cleaned_text)
 
-async def handle_saludo(telefono: str, nombre_usuario: str, user_data: sqlite3.Row):
+async def handle_saludo(telefono: str, nombre_usuario: str, user_data: Dict):
     """Maneja saludos del usuario"""
     user_dict = dict(user_data)
     
@@ -438,15 +438,9 @@ async def handle_saludo(telefono: str, nombre_usuario: str, user_data: sqlite3.R
     
     await send_whatsapp_message(telefono, greeting)
 
-async def handle_analizar_mensaje(telefono: str, mensaje: str, user_data: sqlite3.Row, image_context: dict = None):
+async def handle_analizar_mensaje(telefono: str, mensaje: str, user_data: Dict, image_context: dict = None):
     """
     Maneja la solicitud de análisis de mensaje con LÓGICA HÍBRIDA (SVM Local + DeepSeek IA).
-    
-    El flujo es:
-    1. Ejecutar SVM local para análisis técnico rápido
-    2. Inyectar resultado del SVM en la pregunta a DeepSeek
-    3. DeepSeek actúa como "juez" que combina análisis técnico + humanístico
-    4. Mostrar resumen corto primero, guardar detalles para después
     """
     nombre_usuario = user_data["nombre"] if user_data and user_data["nombre"] else "tú"
     
@@ -454,12 +448,10 @@ async def handle_analizar_mensaje(telefono: str, mensaje: str, user_data: sqlite
         f"🔍 Analizando mensaje con doble verificación (IA + Detección Técnica)... dame unos segundos, {nombre_usuario}.")
     
     # ========== PASO 1: ANÁLISIS TÉCNICO LOCAL (SVM) ==========
-    # Aseguramos que el modelo SVM esté cargado
     if not svm_classifier.model:
         print("⚠️ Modelo SVM no estaba cargado, inicializando...")
         initialize_svm()
     
-    # Ejecutamos el análisis SVM
     svm_result = svm_classifier.analyze_message(mensaje)
     svm_verdict = svm_result['final_verdict']
     
@@ -484,7 +476,6 @@ async def handle_analizar_mensaje(telefono: str, mensaje: str, user_data: sqlite
         detalles_tecnicos += f"\n🚨 ALERTA CRÍTICA: {svm_result.get('override_reason', '')}\n"
     
     # ========== PASO 2: CONSTRUCCIÓN DEL PROMPT HÍBRIDO ==========
-    # Combinamos el mensaje original + lo que opinó el SVM
     prompt_combinado = (
         f"MENSAJE A ANALIZAR:\n"
         f"'''{mensaje}'''\n\n"
@@ -509,17 +500,14 @@ async def handle_analizar_mensaje(telefono: str, mensaje: str, user_data: sqlite
         # Separamos el veredicto corto de los detalles largos
         partes = analisis_completo.split("---DETALLES_SIGUEN---", 1)
         resumen_breve = partes[0].strip()
-        # Si DeepSeek falló en poner el separador, usamos todo el texto como resumen
         detalles_completos = partes[1].strip() if len(partes) > 1 else analisis_completo
 
         # ========== PASO 4: ENVIAR VEREDICTO CORTO ==========
         await send_whatsapp_message(telefono, resumen_breve)
         
-        # Pequeña pausa para mejor UX
         await asyncio.sleep(0.5)
         
         # ========== PASO 5: INVITAR A VER DETALLES ==========
-        # NO PEDIR FEEDBACK AQUÍ - Se pide después en handle_estado_esperando_detalles
         await send_whatsapp_message(telefono, 
             f"📋 Tengo un informe técnico detallado explicando por qué llegamos a esta conclusión.\n\n"
             "¿Quieres ver el **análisis completo**? (Responde SÍ o NO)")
@@ -541,7 +529,7 @@ async def handle_analizar_mensaje(telefono: str, mensaje: str, user_data: sqlite
         
         db_update_user(telefono, db_updates)
         
-        # === GUARDAR LOG PARA RLHF (Reinforcement Learning from Human Feedback) ===
+        # === GUARDAR LOG PARA RLHF ===
         final_verdict = {
             'is_scam': svm_verdict['is_scam'],
             'risk_level': svm_verdict['risk_level'],
@@ -554,15 +542,11 @@ async def handle_analizar_mensaje(telefono: str, mensaje: str, user_data: sqlite
             deepseek_res=analisis_completo,
             final_verdict=final_verdict
         )
-        # ====================================================================
         
-        # Log para debugging
         print(f"✅ Análisis híbrido completado para {telefono}")
-        print(f"   SVM Veredicto: {svm_verdict['is_scam']}")
-        print(f"   Riesgo SVM: {svm_verdict['risk_level']}")
         
     else:
-        # Fallback si falla DeepSeek, pero usamos el SVM como respaldo
+        # Fallback si falla DeepSeek
         fallback_msg = (
             f"Tuve problemas con mi conexión a IA, pero mi sistema local de detección dice:\n\n"
             f"⚠️ **Nivel de Riesgo: {svm_verdict['risk_level']}**\n"
@@ -582,7 +566,6 @@ async def handle_pregunta_seguridad(telefono: str, pregunta: str, user_profile: 
     if respuesta:
         await send_whatsapp_message(telefono, respuesta)
         
-        # Ofrecer recursos adicionales
         await send_whatsapp_message(telefono, 
             f"¿Esta información te ayudó, {nombre_usuario}? "
             f"Si tienes más dudas o quieres un consejo práctico, ¡solo pregúntame! 😊")
@@ -628,55 +611,6 @@ async def handle_meta_pregunta(telefono: str, pregunta: str, nombre_usuario: str
             f"Uso *OCR (reconocimiento de texto)* para leer el contenido y analizarlo. "
             f"¡Envíame la imagen cuando quieras! 🖼️")
     
-    elif any(word in normalized_pregunta for word in ["audio", "voz", "nota de voz", "grabacion"]):
-        await send_whatsapp_message(telefono, 
-            f"🎤 {nombre_usuario}, actualmente *no proceso audios* directamente.\n\n"
-            f"*Alternativas:*\n"
-            f"1️⃣ Transcribe el audio a texto y envíamelo\n"
-            f"2️⃣ Toma una captura si es un mensaje de voz\n"
-            f"3️⃣ Cuéntame de qué trata y te asesoro\n\n"
-            f"¡Espero poder procesar audios pronto! 😊")
-    
-    elif any(word in normalized_pregunta for word in ["como uso", "como funciona", "como te uso", "instrucciones"]):
-        await send_whatsapp_message(telefono, 
-            f"📖 *Guía Rápida de Uso*\n\n"
-            f"*Para analizar un mensaje:*\n"
-            f"1. Simplemente reenvíamelo o cópialo\n"
-            f"2. Yo lo analizaré automáticamente\n"
-            f"3. Te daré un veredicto y recomendaciones\n\n"
-            f"*Para hacer preguntas:*\n"
-            f"Solo escribe tu duda, por ejemplo:\n"
-            f"• '¿Qué es el phishing?'\n"
-            f"• '¿Cómo protejo mi WhatsApp?'\n\n"
-            f"*Para consejos:*\n"
-            f"Pídeme un consejo y te daré uno al azar 💡\n\n"
-            f"¡Es muy sencillo, {nombre_usuario}! ¿Probamos? 😊")
-    
-    elif any(word in normalized_pregunta for word in ["gratis", "costo", "precio", "pago", "cobrar"]):
-        await send_whatsapp_message(telefono, 
-            f"💰 ¡Excelente pregunta, {nombre_usuario}!\n\n"
-            f"✅ *Completamente GRATUITO*\n\n"
-            f"Este servicio es sin costo para ayudar a la comunidad colombiana a "
-            f"navegar más seguro en internet. No hay tarifas ocultas ni pagos.\n\n"
-            f"¡Úsame todas las veces que necesites! 🛡️")
-    
-    elif any(word in normalized_pregunta for word in ["datos", "privacidad", "informacion", "seguro usar"]):
-        await send_whatsapp_message(telefono, 
-            f"🔒 *Sobre tu privacidad, {nombre_usuario}:*\n\n"
-            f"✅ Tus mensajes se analizan y NO se comparten\n"
-            f"✅ Guardo solo: nombre, edad, nivel de conocimiento\n"
-            f"✅ Cumplimos con la Ley 1581 de 2012 (Colombia)\n"
-            f"✅ Nunca vendo ni comparto tu información\n\n"
-            f"Tu seguridad y privacidad son mi prioridad. 💙")
-    
-    elif any(word in normalized_pregunta for word in ["creador", "quien te creo", "desarrollador", "quien te hizo"]):
-        await send_whatsapp_message(telefono, 
-            f"👨‍💻 Fui desarrollado como un proyecto de seguridad cibernética "
-            f"para ayudar a usuarios en Colombia a identificar estafas y phishing.\n\n"
-            f"Uso inteligencia artificial (DeepSeek) para analizar mensajes y "
-            f"tecnología OCR para leer imágenes.\n\n"
-            f"¿Te gustaría saber algo más sobre cómo funciono? 😊")
-    
     else:
         # Respuesta genérica para otras preguntas sobre el bot
         await send_whatsapp_message(telefono, 
@@ -712,7 +646,8 @@ async def handle_intencion_desconocida(telefono: str, nombre_usuario: str, inten
         f"3️⃣ *Darte consejos prácticos*\n"
         f"   Solo pídeme un tip de seguridad\n\n"
         f"¿Cuál de estas opciones te interesa?")
-async def handle_image_message(telefono: str, message_object: dict, user_data: sqlite3.Row):
+
+async def handle_image_message(telefono: str, message_object: dict, user_data: Dict):
     """Maneja mensajes de imagen"""
     nombre_usuario = user_data["nombre"] if user_data and user_data["nombre"] else "tú"
     image_id_wa = message_object.get("image", {}).get("id")
@@ -723,7 +658,8 @@ async def handle_image_message(telefono: str, message_object: dict, user_data: s
     else:
         await send_whatsapp_message(telefono, 
             f"⚠️ Vaya, {nombre_usuario}, parece que hubo un problema con la imagen que enviaste. ¿Podrías intentar mandarla de nuevo, por favor?")
-async def process_incoming_image_task(telefono: str, user_data: sqlite3.Row, image_id_whatsapp: str):
+
+async def process_incoming_image_task(telefono: str, user_data: Dict, image_id_whatsapp: str):
     """Procesa imágenes recibidas con OCR"""
     from app.services.external_apis import download_image_from_whatsapp
     user_name = user_data["nombre"] if user_data and user_data["nombre"] else "tú"
@@ -788,13 +724,9 @@ async def process_incoming_image_task(telefono: str, user_data: sqlite3.Row, ima
         print(f"ERROR en process_incoming_image_task (tel: {telefono}, img_id: {image_id_whatsapp}): {e}")
         await send_whatsapp_message(telefono, 
             f"⚠️ Lo siento mucho, {user_name}, ocurrió un error inesperado mientras procesaba tu imagen. Por favor, intenta más tarde. 🙏")
-async def handle_estado_esperando_detalles(telefono: str, text: str, user_data: sqlite3.Row, message_type: str):
-    """Maneja la respuesta de si quiere ver detalles o no.
-    
-    FLUJO CORRECTO:
-    - Si dice SÍ -> Mostrar detalles -> Esperar -> Pedir feedback
-    - Si dice NO -> Pedir feedback igual
-    """
+
+async def handle_estado_esperando_detalles(telefono: str, text: str, user_data: Dict, message_type: str):
+    """Maneja la respuesta de si quiere ver detalles o no."""
     nombre_usuario = user_data["nombre"] if user_data and user_data["nombre"] else "tú"
     
     if message_type != "text":
@@ -804,24 +736,21 @@ async def handle_estado_esperando_detalles(telefono: str, text: str, user_data: 
 
     print(f"DEBUG: {telefono} en ESPERANDO_MAS_DETALLES, recibió: '{text}'")
 
-    # Evaluar si el usuario quiere detalles
     user_profile_dict = dict(user_data)
     decision_ia = await analyze_with_deepseek(normalize_text(text), "decision_ver_detalles", user_profile_dict)
     print(f"DEBUG: Decisión de IA para ver detalles ({telefono}): {decision_ia}")
 
     # ===== CASO 1: El usuario QUIERE ver detalles =====
     if decision_ia == "QUIERE_DETALLES":
-        # Enviar detalles
         detalles = user_data["last_analysis_details"]
         if detalles:
             await send_whatsapp_message(telefono, detalles)
         else:
             await send_whatsapp_message(telefono, "⚠️ No pude recuperar los detalles, pero el veredicto anterior se mantiene.")
         
-        # Esperar a que el usuario lea
         await asyncio.sleep(3)
         
-        # AHORA SÍ: Pedir Feedback (después de los detalles)
+        # Pedir Feedback
         try:
             await solicitar_feedback_template(telefono, nombre_usuario)
         except Exception as e:
@@ -829,12 +758,10 @@ async def handle_estado_esperando_detalles(telefono: str, text: str, user_data: 
             await send_whatsapp_message(telefono, 
                 "¿Te fue útil este análisis? (Responde 'útil' o 'no útil')")
 
-    # ===== CASO 2: El usuario NO quiere detalles o responde cualquier otra cosa =====
+    # ===== CASO 2: El usuario NO quiere detalles =====
     else:
-        # Confirmación al usuario
         await send_whatsapp_message(telefono, "Entendido, mantenemos el chat breve.")
         
-        # Igual pedimos feedback porque ya le dimos el veredicto corto
         await asyncio.sleep(1)
         try:
             await solicitar_feedback_template(telefono, nombre_usuario)
@@ -843,14 +770,15 @@ async def handle_estado_esperando_detalles(telefono: str, text: str, user_data: 
             await send_whatsapp_message(telefono, 
                 "¿Te fue útil mi análisis rápido? (Responde 'útil' o 'no útil')")
 
-    # En cualquier caso, volver al estado normal
+    # Volver al estado normal
     db_update_user(telefono, {"estado": ESTADO_REGISTRADO, "last_analysis_details": None})
-async def handle_post_phishing_response(telefono: str, text: str, user_data: sqlite3.Row, message_type: str):
+
+async def handle_post_phishing_response(telefono: str, text: str, user_data: Dict, message_type: str):
     """Maneja la respuesta del usuario después de un análisis de phishing"""
     nombre_usuario = user_data["nombre"] if user_data and user_data["nombre"] else "tú"
     if message_type != "text":
         await send_whatsapp_message(telefono, 
-            f"Hola {nombre_usuario}, estaba esperando una respuesta de SÍ, NO o AYUDA en texto. Si quieres analizar otra cosa, envíala después de responder, por favor. 👍")
+            f"Hola {nombre_usuario}, estaba esperando una respuesta de SÍ, NO o AYUDA en texto.")
         return
 
     normalized_input = normalize_text(text)
@@ -866,141 +794,84 @@ async def handle_post_phishing_response(telefono: str, text: str, user_data: sql
                                                     "ayuda_post_estafa", user_profile_dict)
         if respuesta_ayuda:
             await send_whatsapp_message(telefono, respuesta_ayuda)
-        else:
-            await send_whatsapp_message(telefono, 
-                f"Lo lamento, {nombre_usuario}, tuve dificultades para generar los pasos de ayuda. Si es urgente, te recomiendo contactar directamente a las autoridades. 🙏")
         db_update_user(telefono, {"estado": ESTADO_REGISTRADO, "last_analyzed_url": None})
 
     elif decision_usuario == "RESPUESTA_NO":
         await send_whatsapp_message(telefono, 
-            f"¡Excelente noticia, {nombre_usuario}! 👏 Me alegra mucho que no hayas interactuado con ese mensaje sospechoso. ¡Sigue así, desconfiando y verificando siempre! 😊")
+            f"¡Excelente noticia, {nombre_usuario}! 👏 Me alegra mucho que no hayas interactuado.")
         db_update_user(telefono, {"estado": ESTADO_REGISTRADO, "last_analyzed_url": None})
 
     elif decision_usuario == "PIDE_AYUDA":
         await send_whatsapp_message(telefono, 
-            f"🆘 De acuerdo, {nombre_usuario}. Te prepararé los pasos de ayuda específicos. Un momento... 🛡️")
-        respuesta_ayuda = await analyze_with_deepseek("El usuario escribió AYUDA tras un análisis de estafa.", 
+            f"🆘 De acuerdo, {nombre_usuario}. Te prepararé los pasos de ayuda específicos...")
+        respuesta_ayuda = await analyze_with_deepseek("El usuario escribió AYUDA.", 
                                                     "ayuda_post_estafa", user_profile_dict)
         if respuesta_ayuda:
             await send_whatsapp_message(telefono, respuesta_ayuda)
-        else:
-            await send_whatsapp_message(telefono, 
-                f"Lo lamento, {nombre_usuario}, tuve dificultades para generar los pasos de ayuda. 🙏")
         db_update_user(telefono, {"estado": ESTADO_REGISTRADO, "last_analyzed_url": None})
 
-    elif decision_usuario == "ES_PREGUNTA":
-        print(f"DEBUG: Usuario {telefono} hizo una pregunta en estado ESPERANDO_RESPUESTA_PHISHING")
-        await send_whatsapp_message(telefono, 
-            f"🤔 ¡Claro, {nombre_usuario}! Déjame responder tu pregunta. Un momento...")
-        respuesta = await analyze_with_deepseek(text, "cyber_pregunta", user_profile_dict)
-        if respuesta:
-            await send_whatsapp_message(telefono, respuesta)
-            await send_whatsapp_message(telefono, 
-                f"Espero que eso haya aclarado tu duda, {nombre_usuario}. Recordando el mensaje sospechoso, ¿llegaste a interactuar con él (SÍ/NO) o necesitas AYUDA específica?")
-        else:
-            await send_whatsapp_message(telefono, 
-                f"Mis disculpas, {nombre_usuario}, no pude procesar tu pregunta. Volviendo al tema: ¿interactuaste con el mensaje (SÍ/NO) o necesitas AYUDA?")
-
-    elif decision_usuario == "ES_COMENTARIO":
-        if "gracias" in normalized_input:
-            respuesta_usuario = f"¡De nada, {nombre_usuario}! 😊 "
-        elif "ok" in normalized_input or "entendido" in normalized_input:
-            respuesta_usuario = f"Entendido, {nombre_usuario}. "
-        else:
-            respuesta_usuario = f"Ok, {nombre_usuario}, he tomado nota de tu comentario. "
-        
-        respuesta_usuario += f"Sobre el mensaje que analizamos, ¿llegaste a interactuar con él (SÍ/NO) o necesitas AYUDA específica?"
-        await send_whatsapp_message(telefono, respuesta_usuario)
-
     else:
-        print(f"DEBUG: Respuesta no clasificada ({decision_usuario}) en ESPERANDO_RESPUESTA_PHISHING para {telefono}")
         await send_whatsapp_message(telefono, 
-            f"🤔 {nombre_usuario}, no estoy seguro de haber entendido tu respuesta. Por favor responde con *SÍ*, *NO*, o escribe *AYUDA*. ¡Gracias!")
+            f"🤔 {nombre_usuario}, por favor responde con *SÍ*, *NO*, o *AYUDA*. ¡Gracias!")
 
-async def handle_admin_review_flow(telefono_remitente: str, text_recibido: str, current_user: sqlite3.Row):
+async def handle_admin_review_flow(telefono_remitente: str, text_recibido: str, current_user: Dict):
     """Maneja el bucle interactivo de revisión de casos negativos para administradores"""
     
     try:
-        # Normalizar entrada
         normalized_input = normalize_text(text_recibido).upper()
         
-        # Definir patrones de respuesta
-        yes_patterns = ["SÍ", "SI", "YES", "S", "CORRECTO", "BIEN", "OK", "ACERTADO"]
-        no_patterns = ["NO", "N", "MAL", "INCORRECTO", "ERROR", "EQUIVOCADO", "FALLIDO"]
-        exit_patterns = ["SALIR", "CANCELAR", "DONE", "TERMINADO", "LISTO"]
+        yes_patterns = ["SÍ", "SI", "YES", "S", "CORRECTO", "BIEN", "OK"]
+        no_patterns = ["NO", "N", "MAL", "INCORRECTO", "ERROR"]
+        exit_patterns = ["SALIR", "CANCELAR", "DONE", "TERMINADO"]
         
-        # Obtener ID del caso actual desde last_analyzed_url
         case_id = current_user["last_analyzed_url"] if current_user else None
         if not case_id:
             await send_whatsapp_message(telefono_remitente, 
-                "⚠️ No tengo registro del caso que estás revisando. Por favor inicia de nuevo con `/revisar`.")
+                "⚠️ No tengo registro del caso. Inicia de nuevo con `/revisar`.")
             db_update_user(telefono_remitente, {"estado": ESTADO_REGISTRADO, "last_analyzed_url": None})
             return
         
-        # Verificar si usuario quiere salir
         if any(exit in normalized_input for exit in exit_patterns):
             await send_whatsapp_message(telefono_remitente, 
-                "✋ Revisión finalizada. Volviendo al estado normal. ¿En qué te puedo ayudar?")
+                "✋ Revisión finalizada.")
             db_update_user(telefono_remitente, {"estado": ESTADO_REGISTRADO, "last_analyzed_url": None})
             return
         
-        # Procesar decisión del administrador
         if any(yes in normalized_input for yes in yes_patterns):
-            # Bot estaba equivocado
             bot_was_wrong = True
-            decision_text = "❌ Bot estaba EQUIVOCADO"
         elif any(no in normalized_input for no in no_patterns):
-            # Bot estaba correcto
             bot_was_wrong = False
-            decision_text = "✅ Bot estaba CORRECTO"
         else:
-            # Respuesta inválida
             await send_whatsapp_message(telefono_remitente, 
-                "❓ No entendí tu respuesta. Por favor responde con:\n"
-                "• *SÍ* (bot estaba equivocado)\n"
-                "• *NO* (bot estaba correcto)\n"
-                "• *SALIR* (finalizar revisión)")
+                "❓ Responde: *SÍ* (bot equivocado) / *NO* (bot correcto) / *SALIR*")
             return
         
-        # Guardar decisión del administrador
         mark_admin_decision(case_id, bot_was_wrong=bot_was_wrong)
         print(f"✅ Decisión guardada para caso {case_id}: bot_was_wrong={bot_was_wrong}")
         
-        # Obtener siguiente caso pendiente
         next_case = get_next_pending_negative_review()
         
         if next_case:
-            # Actualizar usuario con nuevo caso y mostrar siguiente
             db_update_user(telefono_remitente, {"last_analyzed_url": str(next_case["id"])})
             
-            # Contar total de pendientes
             pending_count = count_pending_reviews()
-            cases_processed = next_case["id"]  # Aproximado
             
             mensaje_siguiente = (
-                f"🕵️‍♂️ CASO DE REVISIÓN #{next_case['id']}\n"
-                f"({cases_processed} de ~{cases_processed + pending_count})\n\n"
-                f"👤 Usuario: {next_case['user_phone'][:4]}****{next_case['user_phone'][-4:]}\n"
+                f"🕵️‍♂️ CASO #{next_case['id']}\n\n"
                 f"💬 Mensaje: \"{next_case['original_user_message'][:100]}...\"\n"
-                f"🤖 Veredicto del bot: *{next_case['bot_verdict']}*\n"
-                f"😞 Usuario opinó: El bot se equivocó\n\n"
-                f"*¿El bot realmente se equivocó?*\n"
-                f"• SI - Bot estaba equivocado\n"
-                f"• NO - Bot estaba correcto\n"
-                f"• SALIR - Finalizar revisión"
+                f"🤖 Bot: *{next_case['bot_verdict']}*\n"
+                f"😞 Usuario: 👎\n\n"
+                f"*¿Bot se equivocó?*\n"
+                f"SI / NO / SALIR"
             )
             await send_whatsapp_message(telefono_remitente, mensaje_siguiente)
         else:
-            # No hay más casos, finalizar revisión
             await send_whatsapp_message(telefono_remitente, 
-                "🎉 ¡Excelente! Has completado la revisión de todos los casos pendientes.\n\n"
-                f"📊 Decisión guardada: {decision_text}\n\n"
-                "Volviendo al estado normal. ¿En qué puedo ayudarte?")
+                "🎉 ¡Completado! Todos los casos revisados.")
             db_update_user(telefono_remitente, {"estado": ESTADO_REGISTRADO, "last_analyzed_url": None})
     
     except Exception as e:
-        print(f"❌ Error en handle_admin_review_flow para {telefono_remitente}: {e}")
+        print(f"❌ Error en review: {e}")
         await send_whatsapp_message(telefono_remitente, 
-            f"⚠️ Ocurrió un error durante la revisión: {str(e)}\n\n"
-            "Por favor intenta de nuevo con `/revisar`.")
+            f"⚠️ Error: {str(e)}")
         db_update_user(telefono_remitente, {"estado": ESTADO_REGISTRADO, "last_analyzed_url": None})
