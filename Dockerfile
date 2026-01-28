@@ -29,7 +29,6 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
 
 # Copia el resto de la aplicación
 COPY app/ ./app/
-COPY .env .
 
 # Crea el directorio para las imágenes con permisos
 RUN mkdir -p /securitybot/imagenes_recibidas && \
@@ -40,12 +39,12 @@ RUN useradd -m -u 1000 appuser && \
     chown -R appuser:appuser /securitybot
 USER appuser
 
-# Expone el puerto en el que correrá FastAPI
-EXPOSE 8000
+# Expone el puerto en el que correrá FastAPI (Cloud Run usa 8080)
+EXPOSE 8080
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:8000/health', timeout=5)" || exit 1
+    CMD python -c "import os,requests; requests.get('http://localhost:%s/health' % os.environ.get('PORT','8080'), timeout=5)" || exit 1
 
 # Ejecuta el servidor Uvicorn con configuración optimizada
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--loop", "uvloop"]
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1 --loop uvloop"]
