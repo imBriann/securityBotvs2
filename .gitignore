@@ -3,6 +3,7 @@
 *.env
 .env.local
 .env.*.local
+.env.deploy
 
 # Python
 __pycache__/
@@ -73,6 +74,9 @@ Thumbs.db
 
 # Docker
 docker-compose.override.yml
+
+# Deploy scripts
+deploy*.sh
 
 # Testing
 .pytest_cache/
