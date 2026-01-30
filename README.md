@@ -419,6 +419,11 @@ DATABASE_URL="postgresql://securitybot_user:password@localhost:5432/securitybot"
 
 # Para Cloud SQL (producción):
 # DATABASE_URL="postgresql://user:pass@/dbname?host=/cloudsql/proyecto:region:instancia"
+
+# Administración
+# Número de teléfono del administrador (sin el símbolo +)
+# Ejemplo: 573001234567 para +57 300 123 4567
+ADMIN_PHONE_NUMBER="573001234567"
 ```
 
 ### Configurar WhatsApp Business
@@ -443,11 +448,15 @@ DATABASE_URL="postgresql://securitybot_user:password@localhost:5432/securitybot"
 
 ### Configurar Administrador
 
-Edita [app/services/admin_commands.py](app/services/admin_commands.py#L18):
+Configura el número de teléfono del administrador en tu archivo `app/.env`:
 
-```python
-ADMIN_PHONE_NUMBER = "573505894033"  # Cambiar por tu número (sin +)
+```bash
+ADMIN_PHONE_NUMBER="573123456789"  # Tu número (sin el símbolo +)
 ```
+
+**Formato**: Sin espacios, sin guión, sin el signo +. Ejemplo:
+- ❌ Incorrecto: `+57 300 123 4567`, `57-300-123-4567`
+- ✅ Correcto: `573001234567`
 
 ---
 
@@ -788,8 +797,6 @@ securityBot/
 ├── 📄 requirements.txt                # Dependencias Python
 ├── 🐳 Dockerfile                      # Configuración Docker
 ├── 🚀 deploy.sh                       # Script de deployment
-├── 📋 DEPLOYMENT_CLOUD_RUN.md         # Guía de deployment
-├── ✅ DEPLOYMENT_CHECKLIST.md         # Checklist pre-deployment
 ├── 📝 .env.example                    # Plantilla de variables
 ├── 🔒 .gitignore                      # Archivos ignorados por git
 ├── 🐋 .dockerignore                   # Archivos ignorados por Docker
@@ -816,23 +823,16 @@ securityBot/
 │   │   ├── 👥 users_state.py          # Gestión de usuarios
 │   │   └── 📊 feedback_db.py          # Sistema de feedback
 │   │
-│   ├── 📁 utils/                      # Utilidades
-│   │   ├── 📄 __init__.py
-│   │   ├── ⚙️ config.py                # Configuración central
-│   │   └── 🧹 preprocessing.py        # Limpieza de texto
-│   │
-│   └── 📁 md/                         # Documentación interna
-│       ├── 📘 RESUMEN_EJECUTIVO.md
-│       ├── 📘 RLHF_SYSTEM.md
-│       ├── 📘 IMPLEMENTATION_COMPLETE.md
-│       └── ... (otros documentos técnicos)
+│   └── 📁 utils/                      # Utilidades
+│       ├── 📄 __init__.py
+│       ├── ⚙️ config.py                # Configuración central
+│       └── 🧹 preprocessing.py        # Limpieza de texto
 │
 ├── 📁 imagenes_recibidas/             # Imágenes procesadas
 │   └── 📝 .gitkeep
 │
 └── 📁 tests/                          # Tests
     ├── 🧪 test_interactive_review.py
-    └── 🐛 debug_template.py
 ```
 
 ---

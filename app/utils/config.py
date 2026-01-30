@@ -46,6 +46,39 @@ class APIConfig:
         return True
 
 
+class AdminConfig:
+    """Configuración de administración del bot."""
+    
+    # Número de teléfono del administrador (sin el símbolo +)
+    ADMIN_PHONE_NUMBER = os.getenv("ADMIN_PHONE_NUMBER", "")
+    
+    @classmethod
+    def validate(cls) -> bool:
+        """
+        Valida que el número de administrador esté configurado.
+        
+        Returns:
+            True si está configurado, False en caso contrario
+        """
+        if not cls.ADMIN_PHONE_NUMBER:
+            print("ADVERTENCIA: ADMIN_PHONE_NUMBER no está configurado.")
+            return False
+        return True
+    
+    @classmethod
+    def is_admin(cls, phone_number: str) -> bool:
+        """
+        Verifica si un número de teléfono es el administrador.
+        
+        Args:
+            phone_number: Número a verificar
+            
+        Returns:
+            True si es admin, False en caso contrario
+        """
+        return phone_number == cls.ADMIN_PHONE_NUMBER
+
+
 class DatabaseConfig:
     """Configuración de base de datos PostgreSQL."""
     

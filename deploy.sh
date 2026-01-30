@@ -79,6 +79,7 @@ deploy_quick() {
     read -p "PHONE_NUMBER_ID: " PHONE_NUMBER_ID
     read -p "DEEPSEEK_API_KEY: " DEEPSEEK_API_KEY
     read -p "DATABASE_URL: " DATABASE_URL
+    read -p "ADMIN_PHONE_NUMBER (sin +): " ADMIN_PHONE_NUMBER
     
     echo ""
     print_header "Iniciando deployment..."
@@ -99,6 +100,7 @@ deploy_quick() {
         --set-env-vars "DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY" \
         --set-env-vars "DEEPSEEK_API_URL=https://api.deepseek.com/v1/chat/completions" \
         --set-env-vars "DATABASE_URL=$DATABASE_URL" \
+        --set-env-vars "ADMIN_PHONE_NUMBER=$ADMIN_PHONE_NUMBER" \
         --add-cloudsql-instances $CLOUD_SQL_INSTANCE
         
     echo ""
@@ -137,6 +139,7 @@ deploy_secure() {
         --set-secrets "PHONE_NUMBER_ID=PHONE_NUMBER_ID:latest" \
         --set-secrets "DEEPSEEK_API_KEY=DEEPSEEK_API_KEY:latest" \
         --set-secrets "DATABASE_URL=DATABASE_URL:latest" \
+        --set-secrets "ADMIN_PHONE_NUMBER=ADMIN_PHONE_NUMBER:latest" \
         --set-env-vars "DEEPSEEK_API_URL=https://api.deepseek.com/v1/chat/completions" \
         --add-cloudsql-instances $CLOUD_SQL_INSTANCE
         
@@ -171,6 +174,10 @@ create_secrets() {
     read -p "DATABASE_URL: " DATABASE_URL
     echo -n "$DATABASE_URL" | gcloud secrets create DATABASE_URL --data-file=- 2>/dev/null || \
         echo -n "$DATABASE_URL" | gcloud secrets versions add DATABASE_URL --data-file=-
+    
+    read -p "ADMIN_PHONE_NUMBER (sin +, ej: 573001234567): " ADMIN_PHONE_NUMBER
+    echo -n "$ADMIN_PHONE_NUMBER" | gcloud secrets create ADMIN_PHONE_NUMBER --data-file=- 2>/dev/null || \
+        echo -n "$ADMIN_PHONE_NUMBER" | gcloud secrets versions add ADMIN_PHONE_NUMBER --data-file=-
     
     echo ""
     echo "✅ Secrets creados/actualizados exitosamente!"

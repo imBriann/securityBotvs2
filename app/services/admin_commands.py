@@ -7,7 +7,7 @@ import os
 from typing import Optional, List, Dict
 from datetime import datetime, timedelta
 from app.storage.users_state import get_db_connection, setup_database, db_update_user
-from app.utils.config import DatabaseConfig, ESTADO_ADMIN_REVISANDO, ESTADO_REGISTRADO
+from app.utils.config import DatabaseConfig, AdminConfig, ESTADO_ADMIN_REVISANDO, ESTADO_REGISTRADO
 from app.services.trainer import (
     generate_retraining_report,
     analyze_feedback_quality,
@@ -19,8 +19,8 @@ from app.storage.feedback_db import (
     count_pending_reviews
 )
 
-# Número de teléfono del administrador (sin el símbolo +)
-ADMIN_PHONE_NUMBER = "573505894033"
+# Número de teléfono del administrador desde variable de entorno
+ADMIN_PHONE_NUMBER = AdminConfig.ADMIN_PHONE_NUMBER
 
 
 def is_admin(phone_number: str) -> bool:
