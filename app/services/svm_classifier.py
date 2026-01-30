@@ -223,7 +223,15 @@ class ImprovedSVMClassifier:
         """
         self.model = None
         self.model_data = None
-        self.model_path = model_path or "app/models/svm_phishing_model.pkl"
+        
+        if model_path:
+            self.model_path = model_path
+        else:
+            # Usar ruta absoluta relativa al archivo actual para funcionar en cualquier contexto
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            app_root = os.path.dirname(current_dir)  # Sube a app/
+            self.model_path = os.path.join(app_root, "models", "svm_phishing_model.pkl")
+        
         self.url_validator = URLValidator()
         
     def load_model(self) -> bool:
@@ -233,8 +241,18 @@ class ImprovedSVMClassifier:
         Returns:
             True si el modelo se cargó exitosamente, False en caso contrario
         """
+        print(f"🔍 Buscando modelo SVM en: {self.model_path}")
+        print(f"   Ruta absoluta resolvida: {os.path.abspath(self.model_path)}")
+        print(f"   Existe: {os.path.exists(self.model_path)}")
+        
         if not os.path.exists(self.model_path):
             print(f"⚠️ No se encontró el modelo SVM en {self.model_path}")
+            # Listar archivos disponibles para debugging
+            models_dir = os.path.dirname(self.model_path)
+            if os.path.exists(models_dir):
+                print(f"   Archivos en {models_dir}:")
+                for f in os.listdir(models_dir):
+                    print(f"      - {f}")
             return False
             
         try:
@@ -242,12 +260,14 @@ class ImprovedSVMClassifier:
                 self.model_data = pickle.load(f)
                 self.model = self.model_data.get('model')
             
-            print(f"✅ Modelo SVM cargado exitosamente")
+            print(f"✅ Modelo SVM cargado exitosamente desde {self.model_path}")
             print(f"   Fecha entrenamiento: {self.model_data.get('trained_date', 'N/A')}")
             print(f"   Versión: {self.model_data.get('version', 'N/A')}")
             return True
         except Exception as e:
+            import traceback
             print(f"❌ Error al cargar el modelo SVM: {e}")
+            print(traceback.format_exc())
             return False
     
     def predict(self, text: str) -> Optional[Tuple[str, float]]:

@@ -44,4 +44,5 @@ EXPOSE 8080
 
 # Ejecuta el servidor Uvicorn con configuración optimizada para Cloud Run
 # Cloud Run maneja su propio health checking, no usar Docker HEALTHCHECK
+ENV CLOUD_RUN=true
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1"]

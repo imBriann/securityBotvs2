@@ -23,14 +23,20 @@ from app.utils.config import (
 import random
 import uuid
 import datetime
+import traceback
 import numpy as np
 import cv2
 import pytesseract
 from PIL import Image
 
-IMAGES_DIR = "imagenes_recibidas"
+# Usar /tmp en Cloud Run (efímero), imagenes_recibidas en local
+if os.environ.get("CLOUD_RUN") or os.environ.get("GOOGLE_CLOUD_PROJECT"):
+    IMAGES_DIR = "/tmp/images"
+else:
+    IMAGES_DIR = "imagenes_recibidas"
+
 if not os.path.exists(IMAGES_DIR):
-    os.makedirs(IMAGES_DIR)
+    os.makedirs(IMAGES_DIR, mode=0o777)
 
 # ===== FUNCIÓN AUXILIAR PARA PLANTILLAS DE FEEDBACK =====
 async def solicitar_feedback_template(telefono: str, nombre_usuario: str):
@@ -721,7 +727,9 @@ async def process_incoming_image_task(telefono: str, user_data: Dict, image_id_w
         await send_whatsapp_message(telefono, 
             f"⚠️ ¡Uy, {user_name}! Parece que tengo un problema técnico con mi sistema para leer imágenes. Lamento no poder analizarla esta vez.")
     except Exception as e:
-        print(f"ERROR en process_incoming_image_task (tel: {telefono}, img_id: {image_id_whatsapp}): {e}")
+        error_trace = traceback.format_exc()
+        print(f"ERROR en process_incoming_image_task (tel: {telefono}, img_id: {image_id_whatsapp}):")
+        print(error_trace)
         await send_whatsapp_message(telefono, 
             f"⚠️ Lo siento mucho, {user_name}, ocurrió un error inesperado mientras procesaba tu imagen. Por favor, intenta más tarde. 🙏")
 
