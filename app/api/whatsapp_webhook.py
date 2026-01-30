@@ -34,6 +34,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+@app.get("/health")
+async def health_check():
+    """
+    Health check endpoint para Google Cloud Run.
+    Cloud Run verifica que el servicio esté respondiendo correctamente.
+    """
+    return {"status": "healthy", "service": "SecurityBot-WA"}
+
 @app.get("/webhook", response_class=PlainTextResponse)
 async def verify_webhook_subscription(request: Request):
     if request.query_params.get("hub.mode") == "subscribe" and \

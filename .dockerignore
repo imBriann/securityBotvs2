@@ -1,0 +1,73 @@
+# No incluir en el build de Docker
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Documentación
+*.md
+README.md
+app/md/
+docs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Entornos virtuales
+venv/
+env/
+ENV/
+
+# Variables de entorno (usar Cloud Run secrets)
+.env
+*.env
+app/.env
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Tests
+tests/
+*.test.py
+.pytest_cache/
+.coverage
+
+# Imágenes procesadas (no necesarias en imagen Docker)
+imagenes_recibidas/*
+
+# Modelos (si son muy grandes, subirlos a Cloud Storage)
+# app/models/*.pkl
+# app/models/*.joblib
+
+# Logs locales
+*.log
+logs/
+
+# Archivos temporales
+*.tmp
+*.temp
+.cache/
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Cloud
+.gcloudignore
+cloudbuild.yaml
+
+# Sistema
+.DS_Store
+Thumbs.db

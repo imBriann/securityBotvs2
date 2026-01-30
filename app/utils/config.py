@@ -80,24 +80,39 @@ class DatabaseConfig:
     def get_connection_params(cls) -> dict:
         """
         Obtiene parámetros de conexión como diccionario.
+        Soporta DATABASE_URL con socket Unix para Cloud SQL.
         
         Returns:
             Dict con parámetros de conexión
         """
         if cls.DATABASE_URL:
-            # Parsear DATABASE_URL
+            # Parsear DATABASE_URL - soporta formato Cloud SQL con socket Unix
+            # Formato: postgresql://user:pass@/database?host=/cloudsql/instance
             import re
-            pattern = r'postgresql://([^:]+):([^@]+)@([^:]+):(\d+)/(.+)'
-            match = re.match(pattern, cls.DATABASE_URL)
+            from urllib.parse import parse_qs, urlparse
             
-            if match:
-                user, password, host, port, dbname = match.groups()
+            parsed = urlparse(cls.DATABASE_URL)
+            
+            # Extraer query parameters (como host con socket Unix)
+            query_params = parse_qs(parsed.query)
+            
+            # Detectar si usa socket Unix (Cloud SQL)
+            if 'host' in query_params and query_params['host'][0].startswith('/cloudsql/'):
+                # Cloud SQL con socket Unix
                 return {
-                    'host': host,
-                    'port': int(port),
-                    'database': dbname,
-                    'user': user,
-                    'password': password
+                    'host': query_params['host'][0],
+                    'database': parsed.path.lstrip('/').split('?')[0],
+                    'user': parsed.username,
+                    'password': parsed.password
+                }
+            else:
+                # Conexión TCP estándar
+                return {
+                    'host': parsed.hostname or cls.POSTGRES_HOST,
+                    'port': parsed.port or 5432,
+                    'database': parsed.path.lstrip('/').split('?')[0],
+                    'user': parsed.username,
+                    'password': parsed.password
                 }
         
         # Usar variables individuales
