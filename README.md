@@ -555,9 +555,6 @@ gcloud run services describe securitybot \
 ./deploy.sh test            # Test básico
 ./deploy.sh rollback        # Rollback a versión anterior
 ```
-
-📚 **Documentación completa**: Ver [DEPLOYMENT_CLOUD_RUN.md](DEPLOYMENT_CLOUD_RUN.md)
-
 ---
 
 ## 📱 Uso
