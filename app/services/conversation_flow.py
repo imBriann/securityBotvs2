@@ -658,8 +658,6 @@ async def handle_image_message(telefono: str, message_object: dict, user_data: D
     nombre_usuario = user_data["nombre"] if user_data and user_data["nombre"] else "tú"
     image_id_wa = message_object.get("image", {}).get("id")
     if image_id_wa:
-        await send_whatsapp_message(telefono, 
-            f"🖼️ ¡Recibí tu imagen, {nombre_usuario}! La voy a revisar con cuidado y te envío mi análisis en un momento. 🧐")
         asyncio.create_task(process_incoming_image_task(telefono, user_data, image_id_wa))
     else:
         await send_whatsapp_message(telefono, 
@@ -687,7 +685,7 @@ async def process_incoming_image_task(telefono: str, user_data: Dict, image_id_w
         image_path = os.path.join(IMAGES_DIR, image_file_name)
 
         def save_and_ocr_sync(path, data_bytes):
-            """Procesa la imagen y extrae texto con OCR optimizado CRÍTICO"""
+            """Extrae texto con OCR ROBUSTO - múltiples intentos para garantizar precisión"""
             with open(path, "wb") as f:
                 f.write(data_bytes)
 
@@ -697,58 +695,106 @@ async def process_incoming_image_task(telefono: str, user_data: Dict, image_id_w
             if img_cv is None:
                 return ""
 
-            # ===== OPTIMIZACIONES CRÍTICAS PARA VELOCIDAD MÁXIMA =====
+            # ===== ESTRATEGIA MULTI-INTENTO PARA MÁXIMA PRECISIÓN =====
             
-            # 1. REDUCIR TAMAÑO AGRESIVAMENTE: máximo 800x600 (clave para velocidad)
-            h, w = img_cv.shape[:2]
-            if w > 800 or h > 600:
-                scale = min(800 / w, 600 / h)
-                new_w, new_h = int(w * scale), int(h * scale)
-                img_cv = cv2.resize(img_cv, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            # INTENTO 1: Procesamiento BALANCEADO (velocidad + calidad)
+            def ocr_intento_1(img):
+                """Procesamiento balanceado: rapidez + calidad"""
+                h, w = img.shape[:2]
+                
+                # Redimensión moderada (1200px máx - mejor que 800)
+                if w > 1200 or h > 1000:
+                    scale = min(1200 / w, 1000 / h) if w > 0 and h > 0 else 1
+                    new_w, new_h = int(w * scale), int(h * scale)
+                    img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+                
+                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                
+                # Thresholding OTSU (más preciso que adaptativo para la mayoría)
+                _, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+                
+                # Cleanup leve (1 iteración)
+                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+                th = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel, iterations=1)
+                
+                # Upscale si es pequeña
+                h, w = th.shape
+                if w < 700 and w > 0:
+                    scale = min(2.0, 700 / w)
+                    th = cv2.resize(th, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+                
+                # Tesseract con PSM 6 (mejor para bloques de texto uniformes)
+                img_pil = Image.fromarray(th)
+                config = "--oem 1 --psm 6 -l spa+eng"
+                texto = pytesseract.image_to_string(img_pil, config=config, timeout=8)
+                return texto.strip()
             
-            # 2. CONVERTIR A ESCALA DE GRISES
-            gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
+            # INTENTO 2: Procesamiento ADAPTATIVO (para imágenes difíciles)
+            def ocr_intento_2(img):
+                """Para imágenes complejas o de baja calidad"""
+                h, w = img.shape[:2]
+                if w > 1200 or h > 1000:
+                    scale = min(1200 / w, 1000 / h) if w > 0 and h > 0 else 1
+                    img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+                
+                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                
+                # Thresholding adaptativo (mejor para variación de iluminación)
+                th = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                          cv2.THRESH_BINARY, blockSize=13, C=2)
+                
+                # Limpieza más fuerte
+                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+                th = cv2.morphologyEx(th, cv2.MORPH_OPEN, kernel, iterations=1)
+                th = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel, iterations=1)
+                
+                # Upscale
+                h, w = th.shape
+                if w < 700:
+                    th = cv2.resize(th, None, fx=min(2.0, 700/w if w > 0 else 1), 
+                                   fy=min(2.0, 700/w if w > 0 else 1), interpolation=cv2.INTER_CUBIC)
+                
+                # PSM 3 para detectar bloques
+                img_pil = Image.fromarray(th)
+                config = "--oem 1 --psm 3 -l spa+eng"
+                texto = pytesseract.image_to_string(img_pil, config=config, timeout=8)
+                return texto.strip()
             
-            # 3. THRESHOLDING ADAPTATIVO (mejor que OTSU)
-            th = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                       cv2.THRESH_BINARY, blockSize=11, C=2)
+            # INTENTO 3: Sin preprocessing fuerte (imagen con mínimo ajuste)
+            def ocr_intento_3(img):
+                """Último intento: imagen con mínimo procesamiento"""
+                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                
+                # Solo threshold OTSU, nada más
+                _, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+                
+                img_pil = Image.fromarray(th)
+                config = "--oem 1 --psm 6 -l spa+eng"
+                texto = pytesseract.image_to_string(img_pil, config=config, timeout=8)
+                return texto.strip()
             
-            # 4. LIMPIAR RUIDO (erosión + dilatación)
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-            th = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel, iterations=1)
+            # Ejecutar intentos en orden
+            intentos = [
+                ("Balanceado", ocr_intento_1),
+                ("Adaptativo", ocr_intento_2),
+                ("Mínimo procesamiento", ocr_intento_3),
+            ]
             
-            # 5. UPSCALE SOLO SI ES PEQUEÑA (<500px)
-            h, w = th.shape
-            if w < 500 and w > 100:
-                scale = max(1.0, min(500 / w, 1.5))  # No upscalear más de 1.5x
-                th = cv2.resize(th, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+            texto_extraido = ""
+            for nombre_intento, func_intento in intentos:
+                try:
+                    texto = func_intento(img_cv)
+                    if texto and len(texto) > 15:  # Si extrae más de 15 caracteres
+                        print(f"✅ OCR {nombre_intento}: {len(texto)} caracteres")
+                        texto_extraido = texto
+                        break
+                    else:
+                        print(f"⚠️ OCR {nombre_intento}: insuficiente ({len(texto)} chars)")
+                except Exception as e:
+                    print(f"ℹ️ OCR {nombre_intento}: {type(e).__name__}")
+                    continue
             
-            # 6. DESKEW SIMPLE (solo si está muy rotada para no perder tiempo)
-            try:
-                coords = np.column_stack(np.where(th > 0))
-                if len(coords) > 100:  # Solo si hay suficientes píxeles
-                    angle = cv2.minAreaRect(coords)[2]
-                    if angle < -45:
-                        angle = 90 + angle
-                    if abs(angle) > 5:  # Solo rotar si ángulo > 5°
-                        h, w = th.shape
-                        center = (w // 2, h // 2)
-                        M = cv2.getRotationMatrix2D(center, angle, 1.0)
-                        th = cv2.warpAffine(th, M, (w, h), flags=cv2.INTER_LINEAR,
-                                           borderMode=cv2.BORDER_CONSTANT, borderValue=255)
-            except Exception as e:
-                pass  # Ignorar errores de deskew
-            
-            # 7. TESSERACT: CONFIGURACIÓN PARA MÁXIMA VELOCIDAD
-            # PSM 3: Detectar bloques (más rápido que PSM 6)
-            # OEM 1: Legacy engine (velocidad máxima)
-            # --psm 3: Assume a single column of variable sized text
-            img_pil = Image.fromarray(th)
-            config = "--oem 1 --psm 3 -l spa+eng"
-            
-            # TIMEOUT CRÍTICO: 10 segundos máximo (sin whitelist para no retrasar)
-            texto = pytesseract.image_to_string(img_pil, config=config, timeout=10)
-            return texto.strip()
+            return texto_extraido
 
         try:
             # Intentar OCR con timeout

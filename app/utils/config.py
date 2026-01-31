@@ -200,26 +200,24 @@ class TesseractConfig:
 
 
 class OCRConfig:
-    """Configuración específica para OCR con máxima velocidad prioritaria."""
+    """Configuración OCR ROBUSTA: máxima precisión garantizada"""
     
-    # Configuración CRÍTICA: Tesseract para velocidad máxima
-    # OEM 1: Legacy engine (mucho más rápido)
-    # PSM 3: Detectar bloques de texto (más rápido que PSM 6 en imágenes complejas)
-    TESSERACT_CONFIG = "--oem 1 --psm 3 -l spa+eng"
+    # Estrategia multi-intento con timeouts generosos
+    # OEM 1: Legacy engine (rápido pero preciso)
+    TESSERACT_CONFIG = "--oem 1 --psm 6 -l spa+eng"
     
-    # Timeouts CRÍTICOS
-    OCR_TIMEOUT = 10  # segundos máximo - si excede, usa fallback sin OCR
+    # Timeouts por intento
+    OCR_TIMEOUT_POR_INTENTO = 8  # segundos por intento individual
     
-    # Dimensiones: REDUCIDAS AL MÁXIMO para velocidad
-    MAX_IMAGE_WIDTH = 800    # ← Reducido de 1600
-    MAX_IMAGE_HEIGHT = 600   # ← Reducido de 1200
-    MIN_IMAGE_WIDTH = 500    # Upscale solo si es más pequeño
-    MAX_UPSCALE_FACTOR = 1.5 # No upscalear más de esto
+    # Dimensiones: BALANCEADAS entre velocidad y precisión
+    MAX_IMAGE_WIDTH = 1200    # Permite más detalle que 800
+    MAX_IMAGE_HEIGHT = 1000   # Altura proporcional
+    MIN_UPSCALE_WIDTH = 700   # Upscale si es menor
+    MAX_UPSCALE_FACTOR = 2.0  # Hasta 2x
     
     # Parámetros de procesamiento
-    ADAPTATION_BLOCK_SIZE = 11  # Thresholding adaptativo
+    ADAPTATION_BLOCK_SIZE = 13  # Thresholding adaptativo
     DILATION_KERNEL_SIZE = 2    # Limpiar ruido
-    MIN_ANGLE_DESKEW = 5        # Solo deskew si ángulo > 5°
     
     # Directorio de imágenes
     IMAGES_DIR = "imagenes_recibidas"
