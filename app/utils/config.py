@@ -200,24 +200,27 @@ class TesseractConfig:
 
 
 class OCRConfig:
-    """Configuración OCR ROBUSTA: máxima precisión garantizada"""
+    """Configuración OCR PROFESIONAL: Tesseract + Visión Computacional Avanzada"""
     
-    # Estrategia multi-intento con timeouts generosos
-    # OEM 1: Legacy engine (rápido pero preciso)
-    TESSERACT_CONFIG = "--oem 1 --psm 6 -l spa+eng"
+    # Configuración Tesseract para máxima precisión
+    # OEM 3: Versión neutra (mejor en muchos casos)
+    # PSM 11: Sparse text (ideal para texto disperso en pantalla - WhatsApp)
+    TESSERACT_CONFIG = "--oem 3 --psm 11 -l spa+eng"
     
-    # Timeouts por intento
-    OCR_TIMEOUT_POR_INTENTO = 8  # segundos por intento individual
+    # Timeouts por intento (generosos para máxima precisión)
+    OCR_TIMEOUT_POR_INTENTO = 10  # segundos
+    MAX_INTENTOS = 4
     
-    # Dimensiones: BALANCEADAS entre velocidad y precisión
-    MAX_IMAGE_WIDTH = 1200    # Permite más detalle que 800
-    MAX_IMAGE_HEIGHT = 1000   # Altura proporcional
-    MIN_UPSCALE_WIDTH = 700   # Upscale si es menor
-    MAX_UPSCALE_FACTOR = 2.0  # Hasta 2x
+    # Técnicas de visión usadas:
+    # ✓ CLAHE: Mejora contraste en JPEG comprimido
+    # ✓ Denoising: Non-Local Means para ruido de compresión
+    # ✓ Deskew: Hough Lines para detectar rotación
+    # ✓ Bilateral Filter: Preserva bordes mientras elimina ruido
+    # ✓ Adaptive Threshold: Para variación de iluminación
+    # ✓ Multiple PSM: 11 (disperso), 6 (bloques), 3 (detectar), fallback simple
     
-    # Parámetros de procesamiento
-    ADAPTATION_BLOCK_SIZE = 13  # Thresholding adaptativo
-    DILATION_KERNEL_SIZE = 2    # Limpiar ruido
+    # Umbral mínimo de caracteres para considerar OCR exitoso
+    MIN_CHARS_SUCCESS = 20  # Requiere al menos 20 caracteres
     
     # Directorio de imágenes
     IMAGES_DIR = "imagenes_recibidas"
