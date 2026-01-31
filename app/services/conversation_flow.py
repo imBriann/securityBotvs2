@@ -685,53 +685,97 @@ async def process_incoming_image_task(telefono: str, user_data: Dict, image_id_w
         image_path = os.path.join(IMAGES_DIR, image_file_name)
 
         def save_and_ocr_sync(path, data_bytes):
-            """OCR SIMPLE Y FUNCIONAL - Sin complejidades innecesarias"""
+            """OCR con LOGGING DETALLADO para debugging"""
+            print(f"🔍 [OCR] Iniciando extracción...")
+            
             with open(path, "wb") as f:
                 f.write(data_bytes)
+            print(f"✓ [OCR] Imagen guardada en {path}")
 
             nparr = np.frombuffer(data_bytes, np.uint8)
             img_cv = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
             if img_cv is None:
+                print(f"❌ [OCR] Error: No se pudo decodificar imagen")
                 return ""
+            
+            h, w = img_cv.shape[:2]
+            print(f"✓ [OCR] Imagen cargada: {w}x{h} px")
 
             try:
-                # ESTRATEGIA SIMPLE Y DIRECTA
+                # Convertir a escala de grises
                 gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
+                print(f"✓ [OCR] Convertido a escala de grises")
                 
-                # CLAHE simple - mejora contraste en JPEG
+                # CLAHE - mejora contraste
                 clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
                 contrasted = clahe.apply(gray)
+                print(f"✓ [OCR] CLAHE aplicado")
                 
                 # Threshold OTSU
                 _, binary = cv2.threshold(contrasted, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+                print(f"✓ [OCR] Threshold OTSU aplicado")
                 
-                # Morphology simple
+                # Morphology
                 kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
                 binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=1)
+                print(f"✓ [OCR] Morphology aplicada")
                 
-                # Upscale si es muy pequeña
+                # Upscale si es pequeña
                 h, w = binary.shape
                 if w < 500:
                     scale = min(3.0, 600 / w)
                     binary = cv2.resize(binary, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+                    print(f"✓ [OCR] Upscale aplicado: {scale}x")
                 
-                # OCR directo con PSM 11 (sparse text)
-                img_pil = Image.fromarray(binary)
-                config = "--oem 3 --psm 11 -l spa+eng"
-                texto = pytesseract.image_to_string(img_pil, config=config, timeout=12)
+                # MÚLTIPLES INTENTOS CON DIFERENTES PSM
+                psm_modes = [
+                    ("PSM 3 (Auto)", "--oem 3 --psm 3 -l spa+eng"),
+                    ("PSM 4 (Columna)", "--oem 3 --psm 4 -l spa+eng"),
+                    ("PSM 6 (Bloque)", "--oem 3 --psm 6 -l spa+eng"),
+                    ("PSM 11 (Sparse)", "--oem 3 --psm 11 -l spa+eng"),
+                    ("PSM 12 (Sparse+OSD)", "--oem 3 --psm 12 -l spa+eng"),
+                ]
                 
-                if texto and len(texto.strip()) > 10:
-                    return texto.strip()
+                mejor_texto = ""
+                mejor_longitud = 0
                 
-                # INTENTO 2: Si falla, probar con PSM 6
-                config2 = "--oem 3 --psm 6 -l spa+eng"
-                texto2 = pytesseract.image_to_string(img_pil, config=config2, timeout=12)
+                for nombre_psm, config in psm_modes:
+                    try:
+                        print(f"   🔄 [OCR] Probando {nombre_psm}...")
+                        img_pil = Image.fromarray(binary)
+                        texto = pytesseract.image_to_string(img_pil, config=config, timeout=10)
+                        texto_limpio = texto.strip()
+                        longitud = len(texto_limpio)
+                        
+                        print(f"      → Extraídos {longitud} caracteres")
+                        
+                        if longitud > mejor_longitud:
+                            mejor_texto = texto_limpio
+                            mejor_longitud = longitud
+                            
+                        # Si encontramos texto sustancial, usar ese
+                        if longitud > 15:
+                            print(f"   ✅ [OCR] {nombre_psm}: ÉXITO con {longitud} chars")
+                            return texto_limpio
+                            
+                    except Exception as e:
+                        print(f"      ❌ {nombre_psm} falló: {type(e).__name__}")
+                        continue
                 
-                return texto2.strip() if texto2 else ""
+                # Retornar el mejor resultado aunque sea corto
+                if mejor_longitud > 0:
+                    print(f"✅ [OCR] Mejor resultado: {mejor_longitud} caracteres")
+                    print(f"   Preview: {mejor_texto[:100]}...")
+                    return mejor_texto
+                else:
+                    print(f"❌ [OCR] No se extrajo texto en ningún intento")
+                    return ""
                 
             except Exception as e:
-                print(f"❌ Error OCR: {type(e).__name__}: {e}")
+                print(f"❌ [OCR] ERROR CRÍTICO: {type(e).__name__}: {e}")
+                import traceback
+                print(traceback.format_exc())
                 return ""
 
         try:
