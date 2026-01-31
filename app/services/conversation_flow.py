@@ -687,7 +687,7 @@ async def process_incoming_image_task(telefono: str, user_data: Dict, image_id_w
         image_path = os.path.join(IMAGES_DIR, image_file_name)
 
         def save_and_ocr_sync(path, data_bytes):
-            """Procesa la imagen y extrae texto con OCR optimizado"""
+            """Procesa la imagen y extrae texto con OCR optimizado CRÍTICO"""
             with open(path, "wb") as f:
                 f.write(data_bytes)
 
@@ -697,65 +697,77 @@ async def process_incoming_image_task(telefono: str, user_data: Dict, image_id_w
             if img_cv is None:
                 return ""
 
-            # ===== OPTIMIZACIONES CRÍTICAS =====
+            # ===== OPTIMIZACIONES CRÍTICAS PARA VELOCIDAD MÁXIMA =====
             
-            # 1. LIMITAR TAMAÑO: Redimensionar a máximo 1600x1200 para acelerar OCR
+            # 1. REDUCIR TAMAÑO AGRESIVAMENTE: máximo 800x600 (clave para velocidad)
             h, w = img_cv.shape[:2]
-            if w > 1600 or h > 1200:
-                scale = min(1600 / w, 1200 / h)
+            if w > 800 or h > 600:
+                scale = min(800 / w, 600 / h)
                 new_w, new_h = int(w * scale), int(h * scale)
                 img_cv = cv2.resize(img_cv, (new_w, new_h), interpolation=cv2.INTER_AREA)
             
             # 2. CONVERTIR A ESCALA DE GRISES
             gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
             
-            # 3. APLICAR THRESHOLDING ADAPTATIVO (mejor que OTSU para imágenes irregulares)
+            # 3. THRESHOLDING ADAPTATIVO (mejor que OTSU)
             th = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                        cv2.THRESH_BINARY, blockSize=11, C=2)
             
-            # 4. REMOVER RUIDO (erosión + dilatación)
+            # 4. LIMPIAR RUIDO (erosión + dilatación)
             kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
             th = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel, iterations=1)
             
-            # 5. AUMENTAR RESOLUCIÓN SOLO SI ES PEQUEÑA (<600px)
+            # 5. UPSCALE SOLO SI ES PEQUEÑA (<500px)
             h, w = th.shape
-            if w < 600 and w > 0:
-                scale = max(1.0, 600 / w)
+            if w < 500 and w > 100:
+                scale = max(1.0, min(500 / w, 1.5))  # No upscalear más de 1.5x
                 th = cv2.resize(th, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
             
-            # 6. DETECTAR ÁNGULO Y ROTAR (deskew) - acelera OCR significativamente
+            # 6. DESKEW SIMPLE (solo si está muy rotada para no perder tiempo)
             try:
                 coords = np.column_stack(np.where(th > 0))
-                angle = cv2.minAreaRect(coords)[2]
-                if angle < -45:
-                    angle = 90 + angle
-                if abs(angle) > 1:  # Solo rotar si ángulo > 1°
-                    h, w = th.shape
-                    center = (w // 2, h // 2)
-                    M = cv2.getRotationMatrix2D(center, angle, 1.0)
-                    th = cv2.warpAffine(th, M, (w, h), flags=cv2.INTER_LINEAR,
-                                       borderMode=cv2.BORDER_CONSTANT, borderValue=255)
+                if len(coords) > 100:  # Solo si hay suficientes píxeles
+                    angle = cv2.minAreaRect(coords)[2]
+                    if angle < -45:
+                        angle = 90 + angle
+                    if abs(angle) > 5:  # Solo rotar si ángulo > 5°
+                        h, w = th.shape
+                        center = (w // 2, h // 2)
+                        M = cv2.getRotationMatrix2D(center, angle, 1.0)
+                        th = cv2.warpAffine(th, M, (w, h), flags=cv2.INTER_LINEAR,
+                                           borderMode=cv2.BORDER_CONSTANT, borderValue=255)
             except Exception as e:
-                print(f"⚠️ Deskew falló (no crítico): {e}")
-                pass
+                pass  # Ignorar errores de deskew
             
-            # 7. CONFIG TESSERACT OPTIMIZADA PARA VELOCIDAD
-            # PSM 6: Asumir bloque uniforme de texto (faster que 3)
-            # OEM 1: Legacy engine (más rápido que 3 en muchos casos)
+            # 7. TESSERACT: CONFIGURACIÓN PARA MÁXIMA VELOCIDAD
+            # PSM 3: Detectar bloques (más rápido que PSM 6)
+            # OEM 1: Legacy engine (velocidad máxima)
+            # --psm 3: Assume a single column of variable sized text
             img_pil = Image.fromarray(th)
-            config = "--oem 1 --psm 6 -l spa+eng --config tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789ñÑ.,;:áéíóúÁÉÍÓÚ¿?¡!@#$%&()-/ "
+            config = "--oem 1 --psm 3 -l spa+eng"
             
-            texto = pytesseract.image_to_string(img_pil, config=config, timeout=15)
+            # TIMEOUT CRÍTICO: 10 segundos máximo (sin whitelist para no retrasar)
+            texto = pytesseract.image_to_string(img_pil, config=config, timeout=10)
             return texto.strip()
 
-        text_ocr = await asyncio.to_thread(save_and_ocr_sync, image_path, image_bytes)
+        try:
+            # Intentar OCR con timeout
+            text_ocr = await asyncio.to_thread(save_and_ocr_sync, image_path, image_bytes)
+        except (asyncio.TimeoutError, RuntimeError) as timeout_error:
+            # Si Tesseract agota timeout, continuar SIN texto OCR
+            print(f"⚠️ OCR timeout para {telefono}: {type(timeout_error).__name__}")
+            text_ocr = None
+        except Exception as ocr_error:
+            # Otros errores de OCR
+            print(f"⚠️ Error OCR para {telefono}: {ocr_error}")
+            text_ocr = None
         
+        # Si no se extrajo texto, intentar análisis directo de imagen
         if not text_ocr:
-            await send_whatsapp_message(telefono, 
-                f"🤔 {user_name}, no pude encontrar texto legible en la imagen. Para que pueda ayudarte mejor, asegúrate de que la imagen sea clara. ¡Gracias!")
-            return
-        
-        text_for_analysis = f"(El siguiente texto fue extraído de una imagen que me envió {user_name}. El OCR podría tener errores, por favor intenta entender el contexto original):\n---\n{text_ocr}\n---"
+            print(f"ℹ️ Usando análisis directo sin OCR para {telefono}")
+            text_for_analysis = f"(Mi análisis de la imagen que recibí de {user_name} sin extraer texto - solo análisis visual)"
+        else:
+            text_for_analysis = f"(El siguiente texto fue extraído de una imagen que me envió {user_name}. El OCR podría tener errores, por favor intenta entender el contexto original):\n---\n{text_ocr}\n---"
         
         image_context = {
             "is_from_image_processing": True,

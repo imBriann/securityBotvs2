@@ -200,27 +200,29 @@ class TesseractConfig:
 
 
 class OCRConfig:
-    """Configuración específica para OCR con optimizaciones de velocidad."""
+    """Configuración específica para OCR con máxima velocidad prioritaria."""
     
-    # Configuración de Tesseract OPTIMIZADA
-    # OEM 1: Legacy engine (faster para la mayoría de casos)
-    # PSM 6: Uniform block of text (rápido)
-    TESSERACT_CONFIG = "--oem 1 --psm 6 -l spa+eng --config tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789ñÑ.,;:áéíóúÁÉÍÓÚ¿?¡!@#$%&()-/ "
+    # Configuración CRÍTICA: Tesseract para velocidad máxima
+    # OEM 1: Legacy engine (mucho más rápido)
+    # PSM 3: Detectar bloques de texto (más rápido que PSM 6 en imágenes complejas)
+    TESSERACT_CONFIG = "--oem 1 --psm 3 -l spa+eng"
     
-    # Timeouts
-    OCR_TIMEOUT = 15  # segundos máximo para OCR
+    # Timeouts CRÍTICOS
+    OCR_TIMEOUT = 10  # segundos máximo - si excede, usa fallback sin OCR
     
-    # Redimensionamiento de imagen
-    MAX_IMAGE_WIDTH = 1600   # Limitar ancho para acelerar
-    MAX_IMAGE_HEIGHT = 1200  # Limitar altura para acelerar
-    MIN_IMAGE_WIDTH = 600    # No upscalear si es menor
+    # Dimensiones: REDUCIDAS AL MÁXIMO para velocidad
+    MAX_IMAGE_WIDTH = 800    # ← Reducido de 1600
+    MAX_IMAGE_HEIGHT = 600   # ← Reducido de 1200
+    MIN_IMAGE_WIDTH = 500    # Upscale solo si es más pequeño
+    MAX_UPSCALE_FACTOR = 1.5 # No upscalear más de esto
+    
+    # Parámetros de procesamiento
+    ADAPTATION_BLOCK_SIZE = 11  # Thresholding adaptativo
+    DILATION_KERNEL_SIZE = 2    # Limpiar ruido
+    MIN_ANGLE_DESKEW = 5        # Solo deskew si ángulo > 5°
     
     # Directorio de imágenes
     IMAGES_DIR = "imagenes_recibidas"
-    
-    # Parámetros de procesamiento
-    ADAPTATION_BLOCK_SIZE = 11  # Para thresholding adaptativo
-    DILATION_KERNEL_SIZE = 2    # Para limpiar ruido
     
     @classmethod
     def ensure_images_dir(cls):
