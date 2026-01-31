@@ -679,10 +679,15 @@ async def process_incoming_image_task(telefono: str, user_data: Dict, image_id_w
 
     image_file_name = f"{telefono}_{uuid.uuid4().hex[:8]}.jpg"
 
+    # Enviar mensaje indicando que está procesando
+    await send_whatsapp_message(telefono, 
+        f"📸 {user_name}, estoy analizando la imagen... dame un momento. 🔍")
+
     try:
         image_path = os.path.join(IMAGES_DIR, image_file_name)
 
         def save_and_ocr_sync(path, data_bytes):
+            """Procesa la imagen y extrae texto con OCR optimizado"""
             with open(path, "wb") as f:
                 f.write(data_bytes)
 
@@ -692,16 +697,55 @@ async def process_incoming_image_task(telefono: str, user_data: Dict, image_id_w
             if img_cv is None:
                 return ""
 
+            # ===== OPTIMIZACIONES CRÍTICAS =====
+            
+            # 1. LIMITAR TAMAÑO: Redimensionar a máximo 1600x1200 para acelerar OCR
+            h, w = img_cv.shape[:2]
+            if w > 1600 or h > 1200:
+                scale = min(1600 / w, 1200 / h)
+                new_w, new_h = int(w * scale), int(h * scale)
+                img_cv = cv2.resize(img_cv, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            
+            # 2. CONVERTIR A ESCALA DE GRISES
             gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
-            _, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
+            
+            # 3. APLICAR THRESHOLDING ADAPTATIVO (mejor que OTSU para imágenes irregulares)
+            th = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                       cv2.THRESH_BINARY, blockSize=11, C=2)
+            
+            # 4. REMOVER RUIDO (erosión + dilatación)
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+            th = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel, iterations=1)
+            
+            # 5. AUMENTAR RESOLUCIÓN SOLO SI ES PEQUEÑA (<600px)
             h, w = th.shape
-            if w < 800:
-                th = cv2.resize(th, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_LINEAR)
-
+            if w < 600 and w > 0:
+                scale = max(1.0, 600 / w)
+                th = cv2.resize(th, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+            
+            # 6. DETECTAR ÁNGULO Y ROTAR (deskew) - acelera OCR significativamente
+            try:
+                coords = np.column_stack(np.where(th > 0))
+                angle = cv2.minAreaRect(coords)[2]
+                if angle < -45:
+                    angle = 90 + angle
+                if abs(angle) > 1:  # Solo rotar si ángulo > 1°
+                    h, w = th.shape
+                    center = (w // 2, h // 2)
+                    M = cv2.getRotationMatrix2D(center, angle, 1.0)
+                    th = cv2.warpAffine(th, M, (w, h), flags=cv2.INTER_LINEAR,
+                                       borderMode=cv2.BORDER_CONSTANT, borderValue=255)
+            except Exception as e:
+                print(f"⚠️ Deskew falló (no crítico): {e}")
+                pass
+            
+            # 7. CONFIG TESSERACT OPTIMIZADA PARA VELOCIDAD
+            # PSM 6: Asumir bloque uniforme de texto (faster que 3)
+            # OEM 1: Legacy engine (más rápido que 3 en muchos casos)
             img_pil = Image.fromarray(th)
-            config = "--oem 3 --psm 6 -l spa+eng"
-            texto = pytesseract.image_to_string(img_pil, config=config)
+            config = "--oem 1 --psm 6 -l spa+eng --config tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789ñÑ.,;:áéíóúÁÉÍÓÚ¿?¡!@#$%&()-/ "
+            
+            texto = pytesseract.image_to_string(img_pil, config=config, timeout=15)
             return texto.strip()
 
         text_ocr = await asyncio.to_thread(save_and_ocr_sync, image_path, image_bytes)

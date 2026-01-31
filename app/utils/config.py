@@ -200,17 +200,27 @@ class TesseractConfig:
 
 
 class OCRConfig:
-    """Configuración específica para OCR."""
+    """Configuración específica para OCR con optimizaciones de velocidad."""
     
-    # Configuración de Tesseract
-    TESSERACT_CONFIG = "--oem 3 --psm 6 -l spa+eng"
+    # Configuración de Tesseract OPTIMIZADA
+    # OEM 1: Legacy engine (faster para la mayoría de casos)
+    # PSM 6: Uniform block of text (rápido)
+    TESSERACT_CONFIG = "--oem 1 --psm 6 -l spa+eng --config tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789ñÑ.,;:áéíóúÁÉÍÓÚ¿?¡!@#$%&()-/ "
     
-    # Umbral de redimensionamiento de imagen
-    MIN_IMAGE_WIDTH = 800
-    RESIZE_FACTOR = 1.5
+    # Timeouts
+    OCR_TIMEOUT = 15  # segundos máximo para OCR
+    
+    # Redimensionamiento de imagen
+    MAX_IMAGE_WIDTH = 1600   # Limitar ancho para acelerar
+    MAX_IMAGE_HEIGHT = 1200  # Limitar altura para acelerar
+    MIN_IMAGE_WIDTH = 600    # No upscalear si es menor
     
     # Directorio de imágenes
     IMAGES_DIR = "imagenes_recibidas"
+    
+    # Parámetros de procesamiento
+    ADAPTATION_BLOCK_SIZE = 11  # Para thresholding adaptativo
+    DILATION_KERNEL_SIZE = 2    # Para limpiar ruido
     
     @classmethod
     def ensure_images_dir(cls):
