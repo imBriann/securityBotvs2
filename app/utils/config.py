@@ -200,27 +200,13 @@ class TesseractConfig:
 
 
 class OCRConfig:
-    """Configuración OCR PROFESIONAL: Tesseract + Visión Computacional Avanzada"""
+    """Configuración OCR SIMPLE Y FUNCIONAL"""
     
-    # Configuración Tesseract para máxima precisión
-    # OEM 3: Versión neutra (mejor en muchos casos)
-    # PSM 11: Sparse text (ideal para texto disperso en pantalla - WhatsApp)
+    # Tesseract directo
     TESSERACT_CONFIG = "--oem 3 --psm 11 -l spa+eng"
     
-    # Timeouts por intento (generosos para máxima precisión)
-    OCR_TIMEOUT_POR_INTENTO = 10  # segundos
-    MAX_INTENTOS = 4
-    
-    # Técnicas de visión usadas:
-    # ✓ CLAHE: Mejora contraste en JPEG comprimido
-    # ✓ Denoising: Non-Local Means para ruido de compresión
-    # ✓ Deskew: Hough Lines para detectar rotación
-    # ✓ Bilateral Filter: Preserva bordes mientras elimina ruido
-    # ✓ Adaptive Threshold: Para variación de iluminación
-    # ✓ Multiple PSM: 11 (disperso), 6 (bloques), 3 (detectar), fallback simple
-    
-    # Umbral mínimo de caracteres para considerar OCR exitoso
-    MIN_CHARS_SUCCESS = 20  # Requiere al menos 20 caracteres
+    # Timeout generoso
+    OCR_TIMEOUT = 12  # segundos
     
     # Directorio de imágenes
     IMAGES_DIR = "imagenes_recibidas"

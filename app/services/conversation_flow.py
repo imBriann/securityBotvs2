@@ -685,7 +685,7 @@ async def process_incoming_image_task(telefono: str, user_data: Dict, image_id_w
         image_path = os.path.join(IMAGES_DIR, image_file_name)
 
         def save_and_ocr_sync(path, data_bytes):
-            """OCR PROFESIONAL: Extrae texto al 100% incluso de JPEG comprimido"""
+            """OCR SIMPLE Y FUNCIONAL - Sin complejidades innecesarias"""
             with open(path, "wb") as f:
                 f.write(data_bytes)
 
@@ -695,174 +695,44 @@ async def process_incoming_image_task(telefono: str, user_data: Dict, image_id_w
             if img_cv is None:
                 return ""
 
-            # ===== PREPROCESAMIENTO PROFESIONAL DE IMAGEN =====
-            
-            # 1. CLAHE - Mejora de contraste adaptativo (excelente para JPEG comprimido)
-            def apply_clahe(gray_img):
-                """Aplicar CLAHE (Contrast Limited Adaptive Histogram Equalization)"""
-                clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-                return clahe.apply(gray_img)
-            
-            # 2. DENOISERNG - Remover ruido de compresión JPEG
-            def denoise_image(img_rgb):
-                """Remover ruido usando Non-Local Means Denoising"""
-                return cv2.fastNlMeansDenoisingColored(img_rgb, None, h=10, hForColorComponents=10, 
-                                                       templateWindowSize=7, searchWindowSize=21)
-            
-            # 3. DESKEW - Detectar y corregir rotación
-            def deskew_image(gray_img, angle_threshold=2):
-                """Detectar ángulo de rotación y corregir"""
-                try:
-                    # Usar Hough transform para detectar líneas
-                    edges = cv2.Canny(gray_img, 100, 200)
-                    lines = cv2.HoughLinesP(edges, 1, np.pi/180, 50, minLineLength=50, maxLineGap=10)
-                    
-                    if lines is not None and len(lines) > 0:
-                        angles = []
-                        for line in lines:
-                            x1, y1, x2, y2 = line[0]
-                            angle = np.arctan2(y2 - y1, x2 - x1) * 180 / np.pi
-                            angles.append(angle)
-                        
-                        # Ángulo promedio
-                        angle = np.median(angles)
-                        if abs(angle) > angle_threshold:
-                            h, w = gray_img.shape
-                            center = (w // 2, h // 2)
-                            M = cv2.getRotationMatrix2D(center, angle, 1.0)
-                            rotated = cv2.warpAffine(gray_img, M, (w, h), 
-                                                    borderMode=cv2.BORDER_CONSTANT, 
-                                                    borderValue=255)
-                            print(f"✓ Deskew: rotación {angle:.1f}°")
-                            return rotated
-                except Exception as e:
-                    print(f"ℹ Deskew skipped: {type(e).__name__}")
+            try:
+                # ESTRATEGIA SIMPLE Y DIRECTA
+                gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
                 
-                return gray_img
-            
-            # INTENTO AGRESIVO 1: CLAHE + Denoising + OTSU
-            def ocr_ultra_robusto_1(img):
-                """Máxima limpieza para imágenes complicadas"""
-                # Denoising
-                img = denoise_image(img)
-                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                
-                # CLAHE
-                gray = apply_clahe(gray)
-                
-                # Upscale si es pequeña
-                h, w = gray.shape
-                if w < 600:
-                    gray = cv2.resize(gray, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
-                
-                # Deskew
-                gray = deskew_image(gray)
+                # CLAHE simple - mejora contraste en JPEG
+                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+                contrasted = clahe.apply(gray)
                 
                 # Threshold OTSU
-                _, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+                _, binary = cv2.threshold(contrasted, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
                 
-                # Morph closing
-                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-                th = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel, iterations=2)
-                
-                # OCR con PSM 11 (texto disperso en página) - mejor para WhatsApp
-                img_pil = Image.fromarray(th)
-                config = "--oem 3 --psm 11 -l spa+eng"
-                texto = pytesseract.image_to_string(img_pil, config=config, timeout=10)
-                return texto.strip()
-            
-            # INTENTO 2: CLAHE + Adaptive Threshold + PSM 6
-            def ocr_ultra_robusto_2(img):
-                """Para texto bien definido en bloques"""
-                img = denoise_image(img)
-                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                gray = apply_clahe(gray)
-                
-                h, w = gray.shape
-                if w < 600:
-                    gray = cv2.resize(gray, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
-                
-                gray = deskew_image(gray)
-                
-                # Adaptive threshold
-                th = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                          cv2.THRESH_BINARY, blockSize=15, C=5)
-                
-                # Limpieza fuerte
+                # Morphology simple
                 kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-                th = cv2.morphologyEx(th, cv2.MORPH_ERODE, kernel, iterations=1)
-                th = cv2.morphologyEx(th, cv2.MORPH_DILATE, kernel, iterations=2)
+                binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=1)
                 
-                img_pil = Image.fromarray(th)
-                config = "--oem 3 --psm 6 -l spa+eng"
-                texto = pytesseract.image_to_string(img_pil, config=config, timeout=10)
-                return texto.strip()
-            
-            # INTENTO 3: Bilateral Filter (preserva bordes) + OTSU
-            def ocr_ultra_robusto_3(img):
-                """Para imágenes con mucho ruido"""
-                # Bilateral filter (excelente para preservar bordes)
-                img = cv2.bilateralFilter(img, 9, 75, 75)
-                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                # Upscale si es muy pequeña
+                h, w = binary.shape
+                if w < 500:
+                    scale = min(3.0, 600 / w)
+                    binary = cv2.resize(binary, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
                 
-                # CLAHE
-                gray = apply_clahe(gray)
-                
-                # Threshold
-                _, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-                
-                # Dilate para conectar caracteres rotos
-                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-                th = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel, iterations=3)
-                
-                img_pil = Image.fromarray(th)
-                config = "--oem 3 --psm 3 -l spa+eng"  # PSM 3: detectar bloques
-                texto = pytesseract.image_to_string(img_pil, config=config, timeout=10)
-                return texto.strip()
-            
-            # INTENTO 4: Mínimo procesamiento (último recurso)
-            def ocr_ultra_robusto_4(img):
-                """Fallback simple - imagen tal cual"""
-                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                
-                img_pil = Image.fromarray(gray)
+                # OCR directo con PSM 11 (sparse text)
+                img_pil = Image.fromarray(binary)
                 config = "--oem 3 --psm 11 -l spa+eng"
-                texto = pytesseract.image_to_string(img_pil, config=config, timeout=10)
-                return texto.strip()
-            
-            # EJECUTAR INTENTOS EN ORDEN
-            intentos = [
-                ("Ultra-robusto 1 (CLAHE+Denoise)", ocr_ultra_robusto_1),
-                ("Ultra-robusto 2 (Adaptive)", ocr_ultra_robusto_2),
-                ("Ultra-robusto 3 (Bilateral)", ocr_ultra_robusto_3),
-                ("Fallback simple", ocr_ultra_robusto_4),
-            ]
-            
-            texto_extraido = ""
-            print(f"🔄 Iniciando extracción OCR con {len(intentos)} intentos...")
-            
-            for nombre_intento, func_intento in intentos:
-                try:
-                    print(f"   ⏳ {nombre_intento}...", end=" ")
-                    texto = func_intento(img_cv)
-                    char_count = len(texto)
-                    
-                    if texto and char_count > 20:  # Umbral: 20 caracteres
-                        print(f"✅ ÉXITO ({char_count} chars)")
-                        texto_extraido = texto
-                        break
-                    else:
-                        print(f"⚠️ Insuficiente ({char_count} chars)")
-                except Exception as e:
-                    print(f"❌ {type(e).__name__}")
-                    continue
-            
-            if texto_extraido:
-                print(f"✅ Texto extraído: {len(texto_extraido)} caracteres")
-            else:
-                print(f"⚠️ No se extrajo texto después de {len(intentos)} intentos")
-            
-            return texto_extraido
+                texto = pytesseract.image_to_string(img_pil, config=config, timeout=12)
+                
+                if texto and len(texto.strip()) > 10:
+                    return texto.strip()
+                
+                # INTENTO 2: Si falla, probar con PSM 6
+                config2 = "--oem 3 --psm 6 -l spa+eng"
+                texto2 = pytesseract.image_to_string(img_pil, config=config2, timeout=12)
+                
+                return texto2.strip() if texto2 else ""
+                
+            except Exception as e:
+                print(f"❌ Error OCR: {type(e).__name__}: {e}")
+                return ""
 
         try:
             # Intentar OCR con timeout
