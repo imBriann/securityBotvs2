@@ -1049,9 +1049,7 @@ Para consultas sobre licenciamiento, contactar al administrador.
 
 **Desarrollado para la comunidad colombiana 🇨🇴**
 
-- 📧 **Email de soporte**: [Configurar email]
-- 💬 **WhatsApp**: [Número del bot en producción]
-- 📱 **Administrador**: +57 350 589 4033
+- 📧 **Email de soporte**: acevedobrian499@gmail.com
 
 ### Enlaces Útiles
 
